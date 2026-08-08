@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Models\Calculator;
+use App\Models\CalculatorInput;
 use App\Models\CampaignEvent;
 use App\Models\Customer;
 use App\Models\LandingPage;
@@ -10,6 +12,7 @@ use App\Models\Product;
 use App\Models\ProductAttribute;
 use App\Models\ProductCategory;
 use App\Models\ProductVariant;
+use App\Models\Promotion;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -120,6 +123,34 @@ class TenantIsolationTest extends TestCase
         app()->instance('currentTenant', $this->tenantB);
         $count = CampaignEvent::where('visitor_id', 'visitor-rahasia')->count();
 
+        $this->assertSame(0, $count);
+    }
+
+    public function test_tenant_b_cannot_read_promotions_of_tenant_a(): void
+    {
+        Promotion::factory()->for($this->tenantA)->create(['name' => 'Promo Rahasia A']);
+
+        app()->instance('currentTenant', $this->tenantB);
+        $count = Promotion::where('name', 'Promo Rahasia A')->count();
+
+        $this->assertSame(0, $count);
+    }
+
+    public function test_tenant_b_cannot_read_calculators_of_tenant_a(): void
+    {
+        $calculator = Calculator::factory()->for($this->tenantA)->create(['name' => 'Kalkulator Rahasia A']);
+        $calculator->inputs()->create([
+            'tenant_id' => $this->tenantA->id,
+            'key' => 'price',
+            'label' => 'Harga',
+            'data_type' => 'number',
+        ]);
+
+        app()->instance('currentTenant', $this->tenantB);
+        $count = Calculator::where('name', 'Kalkulator Rahasia A')->count();
+        $this->assertSame(0, $count);
+
+        $count = CalculatorInput::where('key', 'price')->count();
         $this->assertSame(0, $count);
     }
 

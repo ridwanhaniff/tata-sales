@@ -15,6 +15,8 @@ class DatabaseSeeder extends Seeder
             app()->instance('currentTenant', $tenant);
             $this->callWith(PipelineStageSeeder::class, ['tenant' => $tenant]);
             $this->callWith(LandingPageSeeder::class, ['tenant' => $tenant]);
+            $this->callWith(PromotionSeeder::class, ['tenant' => $tenant]);
+            $this->callWith(CalculatorSeeder::class, ['tenant' => $tenant]);
         }
     }
 }
