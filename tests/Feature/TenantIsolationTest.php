@@ -2,7 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Models\CampaignEvent;
 use App\Models\Customer;
+use App\Models\LandingPage;
 use App\Models\Lead;
 use App\Models\Product;
 use App\Models\ProductAttribute;
@@ -92,6 +94,31 @@ class TenantIsolationTest extends TestCase
 
         app()->instance('currentTenant', $this->tenantB);
         $count = ProductAttribute::where('attribute_key', 'engine')->count();
+
+        $this->assertSame(0, $count);
+    }
+
+    public function test_tenant_b_cannot_read_landing_pages_of_tenant_a(): void
+    {
+        LandingPage::factory()->for($this->tenantA)->create(['slug' => 'home']);
+
+        app()->instance('currentTenant', $this->tenantB);
+        $count = LandingPage::where('slug', 'home')->count();
+
+        $this->assertSame(0, $count);
+    }
+
+    public function test_tenant_b_cannot_read_campaign_events_of_tenant_a(): void
+    {
+        CampaignEvent::create([
+            'tenant_id' => $this->tenantA->id,
+            'visitor_id' => 'visitor-rahasia',
+            'event_type' => 'page_view',
+            'occurred_at' => now(),
+        ]);
+
+        app()->instance('currentTenant', $this->tenantB);
+        $count = CampaignEvent::where('visitor_id', 'visitor-rahasia')->count();
 
         $this->assertSame(0, $count);
     }

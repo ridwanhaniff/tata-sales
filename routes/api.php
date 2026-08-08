@@ -1,10 +1,13 @@
 <?php
 
+use App\Http\Controllers\Api\V1\Admin\LandingPageController as AdminLandingPageController;
 use App\Http\Controllers\Api\V1\Admin\ProductCategoryController as AdminProductCategoryController;
 use App\Http\Controllers\Api\V1\Admin\ProductController as AdminProductController;
 use App\Http\Controllers\Api\V1\Admin\TenantController;
 use App\Http\Controllers\Api\V1\Admin\UserController;
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\Public\EventController;
+use App\Http\Controllers\Api\V1\Public\LandingPageController;
 use App\Http\Controllers\Api\V1\Public\ProductController;
 use Illuminate\Support\Facades\Route;
 
@@ -47,7 +50,22 @@ Route::middleware(['auth:sanctum', 'role:super_admin,owner,manager,content_manag
     Route::post('/admin/product-categories', [AdminProductCategoryController::class, 'store']);
     Route::put('/admin/product-categories/{category}', [AdminProductCategoryController::class, 'update']);
     Route::delete('/admin/product-categories/{category}', [AdminProductCategoryController::class, 'destroy']);
+
+    Route::get('/admin/landing-pages', [AdminLandingPageController::class, 'index']);
+    Route::post('/admin/landing-pages', [AdminLandingPageController::class, 'store']);
+    Route::get('/admin/landing-pages/{landingPage}', [AdminLandingPageController::class, 'show']);
+    Route::put('/admin/landing-pages/{landingPage}', [AdminLandingPageController::class, 'update']);
+    Route::delete('/admin/landing-pages/{landingPage}', [AdminLandingPageController::class, 'destroy']);
+    Route::post('/admin/landing-pages/{landingPage}/publish', [AdminLandingPageController::class, 'publish']);
+    Route::post('/admin/landing-pages/{landingPage}/unpublish', [AdminLandingPageController::class, 'unpublish']);
+    Route::get('/admin/landing-pages/{landingPage}/sections', [AdminLandingPageController::class, 'sections']);
+    Route::post('/admin/landing-pages/{landingPage}/sections', [AdminLandingPageController::class, 'storeSection']);
+    Route::put('/admin/landing-pages/{landingPage}/sections/reorder', [AdminLandingPageController::class, 'reorder']);
+    Route::put('/admin/landing-pages/{landingPage}/sections/{section}', [AdminLandingPageController::class, 'updateSection']);
+    Route::delete('/admin/landing-pages/{landingPage}/sections/{section}', [AdminLandingPageController::class, 'destroySection']);
 });
 
 Route::get('/products', [ProductController::class, 'index']);
 Route::get('/products/{slug}', [ProductController::class, 'show']);
+Route::get('/landing-pages/{slug}', [LandingPageController::class, 'show']);
+Route::post('/events', [EventController::class, 'track']);

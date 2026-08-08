@@ -14,6 +14,7 @@ class DatabaseSeeder extends Seeder
         foreach (Tenant::all() as $tenant) {
             app()->instance('currentTenant', $tenant);
             $this->callWith(PipelineStageSeeder::class, ['tenant' => $tenant]);
+            $this->callWith(LandingPageSeeder::class, ['tenant' => $tenant]);
         }
     }
 }
