@@ -1,0 +1,17 @@
+stateDiagram-v2
+    [*] --> NEW: lead.created
+    NEW --> CONTACTED: sales_first_response
+    NEW --> NURTURE: no_contact_sla_exceeded
+    NEW --> LOST: marked_invalid_or_spam
+    CONTACTED --> QUALIFIED: qualification_criteria_met
+    CONTACTED --> NURTURE: followups_exhausted_no_response
+    CONTACTED --> LOST: customer_declined
+    QUALIFIED --> PROPOSAL: quotation_created
+    PROPOSAL --> NEGOTIATION: quotation_viewed_and_responded
+    PROPOSAL --> LOST: quotation_expired_or_rejected
+    NEGOTIATION --> WON: deal_won
+    NEGOTIATION --> LOST: deal_lost
+    NEGOTIATION --> PROPOSAL: revised_quotation_needed
+    NURTURE --> CONTACTED: customer_re_engaged
+    WON --> [*]
+    LOST --> [*]

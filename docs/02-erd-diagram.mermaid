@@ -1,0 +1,113 @@
+erDiagram
+    TENANTS ||--o{ USERS : employs
+    TENANTS ||--o{ PRODUCTS : owns
+    TENANTS ||--o{ LEADS : owns
+    TENANTS ||--o{ PIPELINE_STAGES : defines
+
+    TENANTS {
+        uuid id PK
+        varchar name
+        varchar slug
+        varchar industry_template
+        varchar timezone
+        varchar plan
+    }
+
+    USERS {
+        uuid id PK
+        uuid tenant_id FK
+        varchar name
+        varchar role
+        varchar status
+    }
+
+    PRODUCT_CATEGORIES ||--o{ PRODUCTS : categorizes
+    PRODUCTS ||--o{ PRODUCT_VARIANTS : has
+    PRODUCTS ||--o{ PRODUCT_ATTRIBUTES : "custom fields"
+    PRODUCTS ||--o{ PRODUCT_IMAGES : has
+
+    PRODUCTS {
+        uuid id PK
+        uuid tenant_id FK
+        uuid category_id FK
+        varchar name
+        decimal base_price
+        varchar stock_status
+        varchar status
+    }
+
+    PROMOTIONS ||--o{ PROMOTION_PRODUCTS : applies_to
+    PRODUCTS ||--o{ PROMOTION_PRODUCTS : "included in"
+    PROMOTIONS ||--o{ PROMOTION_RULES : governed_by
+    PROMOTIONS ||--o{ VOUCHERS : generates
+    VOUCHERS ||--o{ VOUCHER_USAGES : redeemed_via
+
+    LANDING_PAGES ||--o{ PAGE_SECTIONS : contains
+    LANDING_PAGES ||--o{ CAMPAIGN_SOURCES : "attributed to"
+
+    CALCULATORS ||--o{ CALCULATOR_INPUTS : defines
+    CALCULATORS ||--o{ CALCULATOR_RULES : defines
+    CALCULATORS ||--o{ CALCULATOR_OUTPUTS : defines
+    CALCULATORS ||--o{ CALCULATOR_SESSIONS : produces
+
+    CUSTOMERS ||--o{ LEADS : generates
+    CUSTOMERS {
+        uuid id PK
+        uuid tenant_id FK
+        varchar name
+        varchar phone
+        varchar email
+        boolean consent_marketing
+    }
+
+    CAMPAIGNS ||--o{ CAMPAIGN_SOURCES : "tracked by"
+    CAMPAIGNS ||--o{ CAMPAIGN_EVENTS : logs
+    CAMPAIGNS ||--o{ LEADS : sources
+
+    PRODUCTS ||--o{ LEADS : "interested in"
+
+    LEADS {
+        uuid id PK
+        uuid tenant_id FK
+        uuid customer_id FK
+        uuid product_id FK
+        uuid campaign_id FK
+        varchar status
+        varchar temperature
+        int score
+        uuid assigned_to FK
+    }
+
+    LEADS ||--o{ LEAD_EVENTS : logs
+    LEADS ||--o{ LEAD_SCORES : accumulates
+    LEADS ||--o{ LEAD_ASSIGNMENTS : "assigned via"
+    LEADS ||--o{ CALCULATOR_SESSIONS : "linked to"
+    LEADS ||--o{ VOUCHER_USAGES : redeems
+    LEADS ||--o{ CONVERSATIONS : has
+    LEADS ||--o{ FOLLOWUPS : scheduled_for
+    LEADS ||--o{ QUOTATIONS : receives
+    LEADS ||--o{ ACTIVITIES : logs
+    LEADS ||--o{ TASKS : generates
+    LEADS ||--o{ WORKFLOW_RUNS : triggers
+
+    USERS ||--o{ LEAD_ASSIGNMENTS : "assigned to"
+    USERS ||--o{ SALES_TEAM_MEMBERS : "member of"
+    SALES_TEAMS ||--o{ SALES_TEAM_MEMBERS : has
+
+    CONVERSATIONS ||--o{ CONVERSATION_MESSAGES : contains
+    CONVERSATIONS ||--o{ AI_AGENT_LOGS : logs
+    CONVERSATIONS ||--o{ WORKFLOW_RUNS : triggers
+
+    QUOTATIONS ||--o{ QUOTATION_ITEMS : contains
+
+    WORKFLOWS ||--o{ WORKFLOW_NODES : defines
+    WORKFLOWS ||--o{ WORKFLOW_RUNS : executes
+    WORKFLOW_RUNS ||--o{ WORKFLOW_LOGS : produces
+
+    PIPELINE_STAGES {
+        uuid id PK
+        uuid tenant_id FK
+        varchar key
+        boolean is_won
+        boolean is_lost
+    }
