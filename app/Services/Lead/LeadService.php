@@ -10,6 +10,7 @@ use App\Models\Lead;
 use App\Models\LeadEvent;
 use App\Models\Note;
 use App\Models\Notification;
+use App\Models\PipelineStage;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Support\AuditLogger;
@@ -144,7 +145,9 @@ class LeadService
 
     /**
      * Transisi status sesuai state machine (06-lead-state-machine.md).
-     * WON/LOST terminal — tidak bisa keluar.
+     * WON/LOST terminal — tidak bisa keluar. Target status wajib ada di
+     * pipeline_stages tenant (custom pipeline §27), transisi bisa di-override
+     * lewat tenants.settings.pipeline.transitions.
      */
     public function transition(Lead $lead, string $to, ?User $actor = null): Lead
     {
@@ -154,11 +157,51 @@ class LeadService
             return $lead;
         }
 
+        $tenant = Tenant::query()
+            ->withoutGlobalScope('tenant')
+            ->find($lead->tenant_id);
+
+        $stage = PipelineStage::query()
+            ->withoutGlobalScope('tenant')
+            ->where('tenant_id', $lead->tenant_id)
+            ->where('key', $to)
+            ->first();
+
+        if (! $stage) {
+            throw ValidationException::withMessages([
+                'status' => ["Status {$to} tidak ada di pipeline tenant ini."],
+            ]);
+        }
+
+        // WON/LOST selalu terminal — override tenant tidak bisa membuka jalur keluar.
+        if (in_array($from, ['WON', 'LOST'], true)) {
+            throw ValidationException::withMessages([
+                'status' => ["Transisi {$from} → {$to} tidak diizinkan — {$from} adalah status terminal."],
+            ]);
+        }
+
         $allowed = (array) config('tata.pipeline.transitions.'.$from, []);
+
+        $override = $tenant?->settings['pipeline']['transitions'] ?? null;
+        if (is_array($override) && isset($override[$from]) && is_array($override[$from])) {
+            $allowed = $override[$from];
+        }
 
         if (! in_array($to, $allowed, true)) {
             throw ValidationException::withMessages([
                 'status' => ["Transisi {$from} → {$to} tidak diizinkan."],
+            ]);
+        }
+
+        if ($from === 'NEW' && $to === 'CONTACTED' && ! $lead->assigned_to) {
+            throw ValidationException::withMessages([
+                'status' => ['Lead harus di-assign ke sales sebelum ditandai CONTACTED.'],
+            ]);
+        }
+
+        if ($from === 'NEW' && $to === 'LOST' && $actor && $actor->role === 'sales') {
+            throw ValidationException::withMessages([
+                'status' => ['Hanya owner/manager yang bisa menandai lead baru sebagai LOST.'],
             ]);
         }
 

@@ -118,8 +118,9 @@ class AuditLogTest extends TestCase
 
     public function test_lead_status_change_is_audited(): void
     {
+        $sales = User::factory()->for($this->tenant)->role('sales')->create();
         $customer = Customer::factory()->for($this->tenant)->create(['phone' => '6281299997777']);
-        $lead = Lead::factory()->for($customer)->create(['status' => 'NEW']);
+        $lead = Lead::factory()->for($customer)->create(['status' => 'NEW', 'assigned_to' => $sales->id]);
         $this->actingAsRole('manager');
 
         $this->putJson('/api/v1/admin/leads/'.$lead->id, ['status' => 'CONTACTED'])

@@ -20,6 +20,7 @@ class PipelineStage extends Model
         return [
             'is_won' => 'boolean',
             'is_lost' => 'boolean',
+            'created_at' => 'datetime',
         ];
     }
 }

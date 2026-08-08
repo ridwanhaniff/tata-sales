@@ -20,6 +20,7 @@ class CalculatorSession extends Model
         return [
             'input_data' => 'array',
             'output_data' => 'array',
+            'created_at' => 'datetime',
         ];
     }
 

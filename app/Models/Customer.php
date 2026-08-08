@@ -27,4 +27,14 @@ class Customer extends Model
     {
         return $this->hasMany(Lead::class);
     }
+
+    public function calculatorSessions()
+    {
+        return $this->hasMany(CalculatorSession::class);
+    }
+
+    public function voucherUsages()
+    {
+        return $this->hasMany(VoucherUsage::class);
+    }
 }

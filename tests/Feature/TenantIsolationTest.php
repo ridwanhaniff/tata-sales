@@ -24,6 +24,8 @@ use App\Models\ProductVariant;
 use App\Models\Promotion;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Models\Voucher;
+use App\Models\VoucherUsage;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -134,6 +136,8 @@ class TenantIsolationTest extends TestCase
         AuditLog::create(['tenant_id' => $this->tenantA->id, 'actor_id' => $userA->id, 'action' => 'test.aksi', 'entity_type' => 'test', 'entity_id' => $lead->id]);
         CampaignSource::create(['tenant_id' => $this->tenantA->id, 'campaign_id' => $campaign->id]);
         PipelineStage::create(['tenant_id' => $this->tenantA->id, 'key' => 'NEW', 'label' => 'New']);
+        $voucher = Voucher::factory()->for($this->tenantA)->create();
+        VoucherUsage::create(['tenant_id' => $this->tenantA->id, 'voucher_id' => $voucher->id, 'customer_id' => $customer->id]);
 
         app()->instance('currentTenant', $this->tenantB);
 
@@ -146,6 +150,8 @@ class TenantIsolationTest extends TestCase
         $this->assertSame(0, PipelineStage::count());
         $this->assertSame(0, Campaign::count());
         $this->assertSame(0, Notification::count());
+        $this->assertSame(0, Voucher::count());
+        $this->assertSame(0, VoucherUsage::count());
         $this->assertSame(0, $lead2->calculatorSessions()->count());
         $this->assertSame(0, $lead->events()->count());
     }

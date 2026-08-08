@@ -2,14 +2,17 @@
 
 use App\Http\Controllers\Api\V1\Admin\AnalyticsController;
 use App\Http\Controllers\Api\V1\Admin\CalculatorController as AdminCalculatorController;
+use App\Http\Controllers\Api\V1\Admin\CustomerController;
 use App\Http\Controllers\Api\V1\Admin\LandingPageController as AdminLandingPageController;
 use App\Http\Controllers\Api\V1\Admin\LeadController as AdminLeadController;
+use App\Http\Controllers\Api\V1\Admin\PipelineStageController;
 use App\Http\Controllers\Api\V1\Admin\ProductCategoryController as AdminProductCategoryController;
 use App\Http\Controllers\Api\V1\Admin\ProductController as AdminProductController;
 use App\Http\Controllers\Api\V1\Admin\PromotionController as AdminPromotionController;
 use App\Http\Controllers\Api\V1\Admin\SalesDashboardController;
 use App\Http\Controllers\Api\V1\Admin\TenantController;
 use App\Http\Controllers\Api\V1\Admin\UserController;
+use App\Http\Controllers\Api\V1\Admin\VoucherController as AdminVoucherController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\Public\CalculatorController;
 use App\Http\Controllers\Api\V1\Public\EventController;
@@ -17,6 +20,7 @@ use App\Http\Controllers\Api\V1\Public\LandingPageController;
 use App\Http\Controllers\Api\V1\Public\LeadController;
 use App\Http\Controllers\Api\V1\Public\ProductController;
 use App\Http\Controllers\Api\V1\Public\PromotionController;
+use App\Http\Controllers\Api\V1\Public\VoucherController;
 use App\Http\Controllers\Api\V1\Public\WhatsAppController;
 use Illuminate\Support\Facades\Route;
 
@@ -78,6 +82,9 @@ Route::middleware(['auth:sanctum', 'role:super_admin,owner,manager,content_manag
     Route::get('/admin/promotions/{promotion}', [AdminPromotionController::class, 'show']);
     Route::put('/admin/promotions/{promotion}', [AdminPromotionController::class, 'update']);
     Route::delete('/admin/promotions/{promotion}', [AdminPromotionController::class, 'destroy']);
+    Route::post('/admin/promotions/{promotion}/vouchers/generate', [AdminVoucherController::class, 'generate']);
+
+    Route::get('/admin/vouchers', [AdminVoucherController::class, 'index']);
 
     Route::get('/admin/calculators', [AdminCalculatorController::class, 'index']);
     Route::post('/admin/calculators', [AdminCalculatorController::class, 'store']);
@@ -99,6 +106,14 @@ Route::middleware(['auth:sanctum', 'role:owner,manager'])->group(function () {
     Route::get('/admin/analytics/summary', [AnalyticsController::class, 'summary']);
     Route::get('/admin/analytics/funnel', [AnalyticsController::class, 'funnel']);
     Route::get('/admin/analytics/response-time', [AnalyticsController::class, 'responseTime']);
+
+    Route::get('/admin/pipeline-stages', [PipelineStageController::class, 'index']);
+    Route::post('/admin/pipeline-stages', [PipelineStageController::class, 'store']);
+    Route::put('/admin/pipeline-stages/{stage}', [PipelineStageController::class, 'update']);
+    Route::delete('/admin/pipeline-stages/{stage}', [PipelineStageController::class, 'destroy']);
+
+    Route::get('/admin/customers', [CustomerController::class, 'index']);
+    Route::get('/admin/customers/{customer}', [CustomerController::class, 'show']);
 });
 
 Route::get('/products', [ProductController::class, 'index']);
@@ -111,3 +126,4 @@ Route::middleware('throttle:leads')->group(function () {
     Route::post('/leads', [LeadController::class, 'store']);
 });
 Route::post('/whatsapp/context', [WhatsAppController::class, 'context']);
+Route::post('/vouchers/redeem', [VoucherController::class, 'redeem']);

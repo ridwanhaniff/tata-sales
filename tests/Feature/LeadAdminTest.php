@@ -108,7 +108,8 @@ class LeadAdminTest extends TestCase
 
     public function test_manager_can_update_status_via_valid_transition(): void
     {
-        $lead = $this->makeLead(['status' => 'NEW']);
+        $sales = User::factory()->for($this->tenant)->role('sales')->create();
+        $lead = $this->makeLead(['status' => 'NEW', 'assigned_to' => $sales->id]);
         $this->actingAsRole('manager');
 
         $this->putJson('/api/v1/admin/leads/'.$lead->id, ['status' => 'CONTACTED'])
