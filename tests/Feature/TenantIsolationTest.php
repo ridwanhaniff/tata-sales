@@ -8,6 +8,7 @@ use App\Models\CampaignEvent;
 use App\Models\Customer;
 use App\Models\LandingPage;
 use App\Models\Lead;
+use App\Models\Notification;
 use App\Models\Product;
 use App\Models\ProductAttribute;
 use App\Models\ProductCategory;
@@ -65,6 +66,46 @@ class TenantIsolationTest extends TestCase
 
         app()->instance('currentTenant', $this->tenantB);
         $count = Lead::count();
+
+        $this->assertSame(0, $count);
+    }
+
+    public function test_submit_lead_creates_customer_in_requested_tenant(): void
+    {
+        Customer::factory()->for($this->tenantA)->create(['phone' => '6281200000001']);
+
+        $this->withHeader('X-Tenant-ID', $this->tenantB->id)
+            ->postJson('/api/v1/leads', [
+                'customer' => ['name' => 'Budi B', 'phone' => '081200000001'],
+                'consent_marketing' => true,
+            ])
+            ->assertCreated();
+
+        $this->assertDatabaseCount('customers', 2);
+        $this->assertDatabaseCount('leads', 1);
+
+        $lead = Lead::query()->first();
+        $this->assertSame($this->tenantB->id, $lead->tenant_id);
+        $this->assertSame('6281200000001', $lead->customer->phone);
+        $this->assertSame($this->tenantB->id, $lead->customer->tenant_id);
+    }
+
+    public function test_tenant_b_cannot_read_notifications_of_tenant_a(): void
+    {
+        $userA = User::factory()->for($this->tenantA)->create(['role' => 'sales']);
+        $customer = Customer::factory()->for($this->tenantA)->create();
+        $lead = Lead::factory()->for($customer)->create();
+        Notification::create([
+            'tenant_id' => $this->tenantA->id,
+            'user_id' => $userA->id,
+            'channel' => 'dashboard',
+            'type' => 'new_lead',
+            'title' => 'Lead rahasia A',
+            'data' => ['lead_id' => $lead->id],
+        ]);
+
+        app()->instance('currentTenant', $this->tenantB);
+        $count = Notification::where('title', 'Lead rahasia A')->count();
 
         $this->assertSame(0, $count);
     }

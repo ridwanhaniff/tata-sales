@@ -2,17 +2,21 @@
 
 use App\Http\Controllers\Api\V1\Admin\CalculatorController as AdminCalculatorController;
 use App\Http\Controllers\Api\V1\Admin\LandingPageController as AdminLandingPageController;
+use App\Http\Controllers\Api\V1\Admin\LeadController as AdminLeadController;
 use App\Http\Controllers\Api\V1\Admin\ProductCategoryController as AdminProductCategoryController;
 use App\Http\Controllers\Api\V1\Admin\ProductController as AdminProductController;
 use App\Http\Controllers\Api\V1\Admin\PromotionController as AdminPromotionController;
+use App\Http\Controllers\Api\V1\Admin\SalesDashboardController;
 use App\Http\Controllers\Api\V1\Admin\TenantController;
 use App\Http\Controllers\Api\V1\Admin\UserController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\Public\CalculatorController;
 use App\Http\Controllers\Api\V1\Public\EventController;
 use App\Http\Controllers\Api\V1\Public\LandingPageController;
+use App\Http\Controllers\Api\V1\Public\LeadController;
 use App\Http\Controllers\Api\V1\Public\ProductController;
 use App\Http\Controllers\Api\V1\Public\PromotionController;
+use App\Http\Controllers\Api\V1\Public\WhatsAppController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', function () {
@@ -81,9 +85,22 @@ Route::middleware(['auth:sanctum', 'role:super_admin,owner,manager,content_manag
     Route::delete('/admin/calculators/{calculator}', [AdminCalculatorController::class, 'destroy']);
 });
 
+Route::middleware(['auth:sanctum', 'role:owner,manager,sales'])->group(function () {
+    Route::get('/admin/leads', [AdminLeadController::class, 'index']);
+    Route::get('/admin/leads/{lead}', [AdminLeadController::class, 'show']);
+    Route::put('/admin/leads/{lead}', [AdminLeadController::class, 'update']);
+    Route::post('/admin/leads/{lead}/assign', [AdminLeadController::class, 'assign']);
+    Route::post('/admin/leads/{lead}/notes', [AdminLeadController::class, 'notes']);
+    Route::get('/admin/sales/dashboard', [SalesDashboardController::class, 'dashboard']);
+});
+
 Route::get('/products', [ProductController::class, 'index']);
 Route::get('/products/{slug}', [ProductController::class, 'show']);
 Route::get('/landing-pages/{slug}', [LandingPageController::class, 'show']);
 Route::get('/promotions/active', [PromotionController::class, 'active']);
 Route::post('/events', [EventController::class, 'track']);
 Route::post('/calculators/{calculator}/calculate', [CalculatorController::class, 'calculate']);
+Route::middleware('throttle:leads')->group(function () {
+    Route::post('/leads', [LeadController::class, 'store']);
+});
+Route::post('/whatsapp/context', [WhatsAppController::class, 'context']);

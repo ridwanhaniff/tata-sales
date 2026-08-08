@@ -9,6 +9,11 @@ use Illuminate\Support\Facades\App;
 
 trait BelongsToTenant
 {
+    public function tenant()
+    {
+        return $this->belongsTo(Tenant::class);
+    }
+
     protected static function bootBelongsToTenant(): void
     {
         static::addGlobalScope('tenant', function (Builder $builder) {

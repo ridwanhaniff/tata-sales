@@ -41,6 +41,21 @@ class User extends Authenticatable
         return $this->belongsTo(Tenant::class);
     }
 
+    public function assignedLeads()
+    {
+        return $this->hasMany(Lead::class, 'assigned_to');
+    }
+
+    public function leadAssignments()
+    {
+        return $this->hasMany(LeadAssignment::class, 'assigned_to');
+    }
+
+    public function notifications()
+    {
+        return $this->hasMany(Notification::class);
+    }
+
     public function isSuperAdmin(): bool
     {
         return $this->role === self::ROLE_SUPER_ADMIN;
