@@ -15,6 +15,11 @@ class ProductCategory extends Model
 
     protected $guarded = [];
 
+    public function tenant()
+    {
+        return $this->belongsTo(Tenant::class);
+    }
+
     public function parent()
     {
         return $this->belongsTo(self::class, 'parent_id');

@@ -18,10 +18,12 @@ class ApiResponse
         return response()->json($payload, $status);
     }
 
-    public static function paginated(LengthAwarePaginator $paginator): JsonResponse
+    public static function paginated(LengthAwarePaginator $paginator, ?string $resource = null): JsonResponse
     {
+        $items = $resource ? $resource::collection($paginator->items()) : $paginator->items();
+
         return response()->json([
-            'data' => $paginator->items(),
+            'data' => $items,
             'meta' => [
                 'current_page' => $paginator->currentPage(),
                 'per_page' => $paginator->perPage(),

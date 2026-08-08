@@ -15,6 +15,20 @@ class Product extends Model
 
     protected $guarded = [];
 
+    protected function casts(): array
+    {
+        return [
+            'base_price' => 'decimal:2',
+            'featured' => 'boolean',
+            'published_at' => 'datetime',
+        ];
+    }
+
+    public function tenant()
+    {
+        return $this->belongsTo(Tenant::class);
+    }
+
     public function category()
     {
         return $this->belongsTo(ProductCategory::class);

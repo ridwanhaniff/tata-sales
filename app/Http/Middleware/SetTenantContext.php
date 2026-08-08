@@ -15,7 +15,7 @@ class SetTenantContext
 
         return DB::transaction(function () use ($next, $request, $tenant) {
             if ($tenant) {
-                DB::statement('SET LOCAL app.tenant_id = ?', [$tenant->id]);
+                DB::statement("SET LOCAL app.tenant_id = '{$tenant->id}'");
             }
 
             return $next($request);

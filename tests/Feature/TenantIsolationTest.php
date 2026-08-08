@@ -5,6 +5,9 @@ namespace Tests\Feature;
 use App\Models\Customer;
 use App\Models\Lead;
 use App\Models\Product;
+use App\Models\ProductAttribute;
+use App\Models\ProductCategory;
+use App\Models\ProductVariant;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -57,6 +60,38 @@ class TenantIsolationTest extends TestCase
 
         app()->instance('currentTenant', $this->tenantB);
         $count = Lead::count();
+
+        $this->assertSame(0, $count);
+    }
+
+    public function test_tenant_b_cannot_read_product_categories_of_tenant_a(): void
+    {
+        ProductCategory::factory()->for($this->tenantA)->create(['name' => 'SUV A']);
+
+        app()->instance('currentTenant', $this->tenantB);
+        $count = ProductCategory::where('name', 'SUV A')->count();
+
+        $this->assertSame(0, $count);
+    }
+
+    public function test_tenant_b_cannot_read_product_variants_of_tenant_a(): void
+    {
+        $product = Product::factory()->for($this->tenantA)->create();
+        $product->variants()->create(['tenant_id' => $this->tenantA->id, 'name' => 'Varian A', 'price' => 1000]);
+
+        app()->instance('currentTenant', $this->tenantB);
+        $count = ProductVariant::where('name', 'Varian A')->count();
+
+        $this->assertSame(0, $count);
+    }
+
+    public function test_tenant_b_cannot_read_product_attributes_of_tenant_a(): void
+    {
+        $product = Product::factory()->for($this->tenantA)->create();
+        $product->attributes()->create(['tenant_id' => $this->tenantA->id, 'attribute_key' => 'engine', 'attribute_value' => '1500cc']);
+
+        app()->instance('currentTenant', $this->tenantB);
+        $count = ProductAttribute::where('attribute_key', 'engine')->count();
 
         $this->assertSame(0, $count);
     }
