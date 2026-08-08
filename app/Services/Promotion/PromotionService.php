@@ -6,6 +6,7 @@ use App\Models\Product;
 use App\Models\Promotion;
 use App\Models\PromotionProduct;
 use App\Models\PromotionRule;
+use App\Support\AuditLogger;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -69,13 +70,22 @@ class PromotionService
             $this->syncProducts($promotion, $data['product_ids'] ?? []);
             $this->syncRules($promotion, $data['rules'] ?? []);
 
+            AuditLogger::log('promo.created', 'promotion', $promotion->id, [], Arr::only($data, [
+                'name', 'discount_type', 'discount_value', 'starts_at', 'ends_at', 'status',
+            ]));
+
             return $promotion->fresh();
         });
     }
 
     public function update(Promotion $promotion, array $data): Promotion
     {
-        return DB::transaction(function () use ($promotion, $data) {
+        $before = Arr::only($promotion->getAttributes(), [
+            'name', 'discount_type', 'discount_value', 'minimum_purchase',
+            'usage_limit', 'starts_at', 'ends_at', 'status',
+        ]);
+
+        return DB::transaction(function () use ($promotion, $data, $before) {
             $promotion->update(Arr::only($data, [
                 'name', 'description', 'discount_type', 'discount_value',
                 'minimum_purchase', 'usage_limit', 'starts_at', 'ends_at', 'status',
@@ -88,6 +98,11 @@ class PromotionService
             if (array_key_exists('rules', $data)) {
                 $this->syncRules($promotion, $data['rules']);
             }
+
+            AuditLogger::log('promo.updated', 'promotion', $promotion->id, $before, Arr::only(
+                $promotion->fresh()->getAttributes(),
+                ['name', 'discount_type', 'discount_value', 'minimum_purchase', 'usage_limit', 'starts_at', 'ends_at', 'status']
+            ));
 
             return $promotion->fresh();
         });

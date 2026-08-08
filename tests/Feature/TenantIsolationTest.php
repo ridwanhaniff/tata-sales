@@ -2,13 +2,21 @@
 
 namespace Tests\Feature;
 
+use App\Models\AuditLog;
 use App\Models\Calculator;
 use App\Models\CalculatorInput;
+use App\Models\Campaign;
 use App\Models\CampaignEvent;
+use App\Models\CampaignSource;
 use App\Models\Customer;
 use App\Models\LandingPage;
 use App\Models\Lead;
+use App\Models\LeadAssignment;
+use App\Models\LeadEvent;
+use App\Models\LeadScore;
+use App\Models\Note;
 use App\Models\Notification;
+use App\Models\PipelineStage;
 use App\Models\Product;
 use App\Models\ProductAttribute;
 use App\Models\ProductCategory;
@@ -108,6 +116,38 @@ class TenantIsolationTest extends TestCase
         $count = Notification::where('title', 'Lead rahasia A')->count();
 
         $this->assertSame(0, $count);
+    }
+
+    public function test_full_regression_all_sprint4_and_5_tables(): void
+    {
+        $userA = User::factory()->for($this->tenantA)->role('sales')->create();
+        $customer = Customer::factory()->for($this->tenantA)->create(['phone' => '6281200000003']);
+        $lead = Lead::factory()->for($customer)->create();
+        $lead2 = Lead::factory()->for($customer)->create();
+        $product = Product::factory()->for($this->tenantA)->create();
+        $campaign = Campaign::factory()->for($this->tenantA)->create();
+
+        LeadEvent::create(['tenant_id' => $this->tenantA->id, 'lead_id' => $lead->id, 'event_type' => 'lead_created']);
+        LeadScore::create(['tenant_id' => $this->tenantA->id, 'lead_id' => $lead->id, 'event_type' => 'lead_created', 'points' => 5, 'resulting_score' => 5]);
+        LeadAssignment::create(['tenant_id' => $this->tenantA->id, 'lead_id' => $lead->id, 'assigned_to' => $userA->id, 'method' => 'round_robin']);
+        Note::create(['tenant_id' => $this->tenantA->id, 'lead_id' => $lead->id, 'customer_id' => $customer->id, 'user_id' => $userA->id, 'content' => 'Catatan A']);
+        AuditLog::create(['tenant_id' => $this->tenantA->id, 'actor_id' => $userA->id, 'action' => 'test.aksi', 'entity_type' => 'test', 'entity_id' => $lead->id]);
+        CampaignSource::create(['tenant_id' => $this->tenantA->id, 'campaign_id' => $campaign->id]);
+        PipelineStage::create(['tenant_id' => $this->tenantA->id, 'key' => 'NEW', 'label' => 'New']);
+
+        app()->instance('currentTenant', $this->tenantB);
+
+        $this->assertSame(0, LeadEvent::count());
+        $this->assertSame(0, LeadScore::count());
+        $this->assertSame(0, LeadAssignment::count());
+        $this->assertSame(0, Note::count());
+        $this->assertSame(0, AuditLog::count());
+        $this->assertSame(0, CampaignSource::count());
+        $this->assertSame(0, PipelineStage::count());
+        $this->assertSame(0, Campaign::count());
+        $this->assertSame(0, Notification::count());
+        $this->assertSame(0, $lead2->calculatorSessions()->count());
+        $this->assertSame(0, $lead->events()->count());
     }
 
     public function test_tenant_b_cannot_read_product_categories_of_tenant_a(): void

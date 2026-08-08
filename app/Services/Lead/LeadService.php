@@ -3,6 +3,8 @@
 namespace App\Services\Lead;
 
 use App\Models\CalculatorSession;
+use App\Models\Campaign;
+use App\Models\CampaignEvent;
 use App\Models\Customer;
 use App\Models\Lead;
 use App\Models\LeadEvent;
@@ -10,7 +12,9 @@ use App\Models\Note;
 use App\Models\Notification;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Support\AuditLogger;
 use App\Support\PhoneNormalizer;
+use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -21,6 +25,7 @@ class LeadService
     public function __construct(
         private readonly LeadScoringService $scoring,
         private readonly AssignmentService $assignment,
+        private readonly AttributionService $attribution,
     ) {}
 
     /**
@@ -30,7 +35,7 @@ class LeadService
      * @param  array<string, mixed>  $data
      * @return array{lead: Lead, created: bool, assigned_to: array<string, mixed>|null}
      */
-    public function createFromForm(array $data, ?Tenant $tenant = null): array
+    public function createFromForm(array $data, ?Tenant $tenant = null, ?Request $request = null): array
     {
         $tenant ??= app()->bound('currentTenant') ? app('currentTenant') : null;
 
@@ -38,7 +43,7 @@ class LeadService
             throw new InvalidArgumentException('Tenant tidak terdeteksi.');
         }
 
-        return DB::transaction(function () use ($data, $tenant) {
+        return DB::transaction(function () use ($data, $tenant, $request) {
             $customerData = Arr::get($data, 'customer', []);
 
             try {
@@ -53,6 +58,10 @@ class LeadService
             if ($existingLead) {
                 return ['lead' => $existingLead, 'created' => false, 'assigned_to' => $this->assignedSummary($existingLead)];
             }
+
+            $attribution = $this->resolveAttribution($tenant, $data, $request);
+
+            $campaignId = Arr::get($data, 'campaign_id') ?? $attribution['campaign']?->id;
 
             $customer = Customer::query()
                 ->where('phone', $phone)
@@ -81,11 +90,13 @@ class LeadService
                 'product_id' => $data['product_id'] ?? null,
                 'variant_id' => $data['variant_id'] ?? null,
                 'source' => $data['source'] ?? 'form',
-                'campaign_id' => $data['campaign_id'] ?? null,
+                'campaign_id' => $campaignId,
                 'status' => 'NEW',
                 'provider_event_id' => $data['provider_event_id'] ?? null,
                 'last_activity_at' => now(),
             ]);
+
+            $this->recordAttribution($tenant, $lead, $attribution);
 
             $context = ['calculator_completed' => false];
 
@@ -105,6 +116,7 @@ class LeadService
                 'source' => $lead->source,
                 'product_id' => $lead->product_id,
                 'campaign_id' => $lead->campaign_id,
+                'attribution' => $attribution['data'],
             ]);
 
             $this->scoring->apply($lead, $context);
@@ -160,6 +172,8 @@ class LeadService
             'by' => $actor?->id,
         ]);
 
+        AuditLogger::log('lead.status_changed', 'lead', $lead->id, ['status' => $from], ['status' => $to]);
+
         return $lead->fresh();
     }
 
@@ -204,6 +218,52 @@ class LeadService
             ->where('tenant_id', $tenantId)
             ->where('provider_event_id', $providerEventId)
             ->first();
+    }
+
+    /**
+     * @return array{campaign: ?Campaign, data: array<string, mixed>}
+     */
+    private function resolveAttribution(Tenant $tenant, array $data, ?Request $request): array
+    {
+        if (! $this->attribution) {
+            return ['campaign' => null, 'data' => []];
+        }
+
+        $referrer = $request ? $this->attribution->referrerFrom($request) : null;
+        $landingPage = $data['landing_page'] ?? ($request ? $this->attribution->landingPageFrom($request) : null);
+
+        $campaign = $this->attribution->matchCampaign(
+            $tenant->id,
+            (array) ($data['utm'] ?? [])
+        );
+
+        return [
+            'campaign' => $campaign,
+            'data' => $this->attribution->sanitize((array) ($data['utm'] ?? []), $referrer, $landingPage),
+        ];
+    }
+
+    /**
+     * @param  array{campaign: ?Campaign, data: array<string, mixed>}  $attribution
+     */
+    private function recordAttribution(Tenant $tenant, Lead $lead, array $attribution): void
+    {
+        $data = $attribution['data'];
+
+        if ($data['utm'] === [] && $data['referrer'] === null && $data['landing_page'] === null) {
+            return;
+        }
+
+        CampaignEvent::create([
+            'tenant_id' => $tenant->id,
+            'campaign_id' => $attribution['campaign']?->id,
+            'event_type' => 'form_complete',
+            'event_data' => [
+                ...$data,
+                'lead_id' => $lead->id,
+            ],
+            'occurred_at' => now(),
+        ]);
     }
 
     private function notifySales(Lead $lead, User $sales): void

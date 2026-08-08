@@ -1,0 +1,31 @@
+<?php
+
+namespace App\Models;
+
+use App\Models\Concerns\BelongsToTenant;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Model;
+
+class AuditLog extends Model
+{
+    use BelongsToTenant;
+    use HasUuids;
+
+    protected $guarded = [];
+
+    public $timestamps = false;
+
+    protected function casts(): array
+    {
+        return [
+            'before_data' => 'array',
+            'after_data' => 'array',
+            'created_at' => 'datetime',
+        ];
+    }
+
+    public function actor()
+    {
+        return $this->belongsTo(User::class, 'actor_id');
+    }
+}

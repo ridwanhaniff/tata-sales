@@ -4,6 +4,7 @@ namespace App\Services\Product;
 
 use App\Models\Product;
 use App\Models\ProductVariant;
+use App\Support\AuditLogger;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -30,10 +31,18 @@ class ProductService
         $data = $this->prepare($data, $product->tenant_id, $product);
 
         return DB::transaction(function () use ($data, $product) {
+            $before = $this->criticalFields($product->getAttributes());
+
             $product->update($data['product']);
 
             $this->syncVariants($product, $data['variants'] ?? null);
             $this->syncAttributes($product, $data['attributes'] ?? null);
+
+            $after = $this->criticalFields($product->fresh()->getAttributes());
+
+            if ($before !== $after) {
+                AuditLogger::log('product.price_changed', 'product', $product->id, $before, $after);
+            }
 
             return $product->fresh();
         });
@@ -143,5 +152,20 @@ class ProductService
                 'slug' => ['Slug sudah dipakai.'],
             ]);
         }
+    }
+
+    private function criticalFields(array $attributes): array
+    {
+        $fields = array_merge([
+            'base_price' => null,
+            'category_id' => null,
+            'status' => null,
+            'stock_status' => null,
+            'featured' => null,
+        ], Arr::only($attributes, ['base_price', 'category_id', 'status', 'stock_status', 'featured']));
+
+        return collect($fields)
+            ->map(fn ($value) => is_numeric($value) ? (float) $value : $value)
+            ->all();
     }
 }

@@ -20,7 +20,7 @@ class LeadController extends Controller
     {
         $tenant = $request->attributes->get('tenant');
 
-        $result = $this->service->createFromForm($request->validated(), $tenant);
+        $result = $this->service->createFromForm($request->validated(), $tenant, $request);
 
         $lead = $result['lead'];
 

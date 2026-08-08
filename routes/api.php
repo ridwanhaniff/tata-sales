@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\V1\Admin\AnalyticsController;
 use App\Http\Controllers\Api\V1\Admin\CalculatorController as AdminCalculatorController;
 use App\Http\Controllers\Api\V1\Admin\LandingPageController as AdminLandingPageController;
 use App\Http\Controllers\Api\V1\Admin\LeadController as AdminLeadController;
@@ -92,6 +93,12 @@ Route::middleware(['auth:sanctum', 'role:owner,manager,sales'])->group(function 
     Route::post('/admin/leads/{lead}/assign', [AdminLeadController::class, 'assign']);
     Route::post('/admin/leads/{lead}/notes', [AdminLeadController::class, 'notes']);
     Route::get('/admin/sales/dashboard', [SalesDashboardController::class, 'dashboard']);
+});
+
+Route::middleware(['auth:sanctum', 'role:owner,manager'])->group(function () {
+    Route::get('/admin/analytics/summary', [AnalyticsController::class, 'summary']);
+    Route::get('/admin/analytics/funnel', [AnalyticsController::class, 'funnel']);
+    Route::get('/admin/analytics/response-time', [AnalyticsController::class, 'responseTime']);
 });
 
 Route::get('/products', [ProductController::class, 'index']);

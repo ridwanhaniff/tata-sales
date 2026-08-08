@@ -9,6 +9,7 @@ use App\Http\Resources\PromotionResource;
 use App\Models\Promotion;
 use App\Services\Promotion\PromotionService;
 use App\Support\ApiResponse;
+use App\Support\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -54,7 +55,10 @@ class PromotionController extends Controller
 
     public function destroy(Promotion $promotion): JsonResponse
     {
+        $id = $promotion->id;
         $promotion->delete();
+
+        AuditLogger::log('promo.deleted', 'promotion', $id);
 
         return ApiResponse::noContent();
     }

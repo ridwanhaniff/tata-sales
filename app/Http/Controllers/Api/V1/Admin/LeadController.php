@@ -13,6 +13,7 @@ use App\Policies\LeadPolicy;
 use App\Services\Lead\AssignmentService;
 use App\Services\Lead\LeadService;
 use App\Support\ApiResponse;
+use App\Support\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -80,6 +81,8 @@ class LeadController extends Controller
 
         $sales = User::query()->findOrFail($request->string('user_id')->toString());
 
+        $previousAssignee = $lead->assigned_to;
+
         $this->assignment->assignManual($lead, $sales, $request->user());
 
         $this->service->logEvent($lead, 'sales_assigned', [
@@ -87,6 +90,10 @@ class LeadController extends Controller
             'method' => 'manual',
             'by' => $request->user()->id,
         ]);
+
+        if ($previousAssignee && $previousAssignee !== $sales->id) {
+            AuditLogger::log('lead.reassigned', 'lead', $lead->id, ['assigned_to' => $previousAssignee], ['assigned_to' => $sales->id]);
+        }
 
         return ApiResponse::success(new LeadResource($lead->fresh(['customer', 'product', 'assignedUser'])));
     }

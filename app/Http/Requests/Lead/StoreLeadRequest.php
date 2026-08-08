@@ -30,6 +30,8 @@ class StoreLeadRequest extends FormRequest
             'utm.utm_campaign' => ['nullable', 'string', 'max:100'],
             'utm.utm_content' => ['nullable', 'string', 'max:100'],
             'utm.utm_term' => ['nullable', 'string', 'max:100'],
+            'landing_page' => ['nullable', 'string', 'max:255'],
+            'referrer' => ['nullable', 'string', 'max:1000'],
         ];
     }
 }
