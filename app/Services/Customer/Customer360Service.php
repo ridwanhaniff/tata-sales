@@ -22,6 +22,7 @@ class Customer360Service
             ->with(['product', 'campaign', 'assignedUser'])
             ->where('customer_id', $customer->id)
             ->orderByDesc('created_at')
+            ->orderByDesc('id')
             ->get();
 
         $timeline = [];

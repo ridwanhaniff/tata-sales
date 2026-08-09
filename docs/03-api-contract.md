@@ -103,6 +103,11 @@ Detail agent di baliknya: lihat `05-agentic-workflow.md`.
 ### `GET /landing-pages/{slug}`
 Mengembalikan `page_sections` terurut dengan `config` per block (§22).
 
+### Link publik quotation — §99, Sprint 12
+- `GET /quotes/{token}` — customer membuka link dari WhatsApp → quotation ditandai `viewed`, lead `PROPOSAL → NEGOTIATION`; response berisi items + total + status
+- `POST /quotes/{token}/respond` `{decision: accept|reject, reason?}` — `accept` → quotation `accepted` + lead `WON`; `reject` → `rejected` + lead `LOST`
+- Rate-limited (`throttle:quotes`), token di-generate saat quotation dikirim.
+
 ---
 
 ## 2. Admin API
@@ -153,6 +158,18 @@ Semua butuh `Authorization: Bearer <token>` + role check.
 - `GET /admin/analytics/summary` — revenue potential, leads, hot leads, conversion rate, WA clicks, calculator completion, top products/campaigns (§48)
 - `GET /admin/analytics/funnel` — visitors → product views → ... → won (§95)
 - `GET /admin/analytics/response-time` — rata-rata waktu lead-created → sales-contacted (§96)
+- `GET /admin/analytics/win-rate` — win rate global + per campaign, won value (§95, Sprint 12)
+- `GET /admin/analytics/pipeline` — jumlah & nilai lead per stage pipeline (§95, Sprint 12)
+- `GET /admin/analytics/campaign-roi` — budget vs won value per campaign (§95, Sprint 12)
+
+**Quotation** (`owner`, `manager`, `sales`) — §99, Sprint 12
+- `GET|POST /admin/quotes` — daftar / buat quotation draft dari lead
+- `GET /admin/quotes/{id}` — detail + items
+- `POST /admin/quotes/{id}/send` — kirim (status `sent`, token publik, share via WhatsApp)
+- `DELETE /admin/quotes/{id}` — hapus (khusus draft)
+
+**WhatsApp Business API** (§25, Sprint 12)
+- `POST /webhooks/whatsapp-status` — status pesan keluar dari provider (sent/delivered/read/failed), verifikasi HMAC sama seperti webhook lain
 
 **Users** (`super_admin`, `owner`)
 - `GET|POST /admin/users`

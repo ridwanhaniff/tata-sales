@@ -48,7 +48,7 @@ class Customer360Test extends TestCase
         $customer = Customer::factory()->for($this->tenant)->create(['phone' => '6281299000011']);
         $product = Product::factory()->for($this->tenant)->create();
 
-        Lead::factory()->for($customer)->create(['product_id' => $product->id, 'status' => 'NEW']);
+        Lead::factory()->for($customer)->create(['product_id' => $product->id, 'status' => 'NEW', 'created_at' => now()->addSeconds(1)]);
         Lead::factory()->for($customer)->create(['status' => 'WON', 'estimated_value' => 250000000]);
 
         $this->getJson('/api/v1/admin/customers/'.$customer->id)

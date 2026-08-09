@@ -8,10 +8,12 @@ use App\Http\Requests\Lead\StoreLeadNoteRequest;
 use App\Http\Requests\Lead\UpdateLeadRequest;
 use App\Http\Resources\LeadResource;
 use App\Models\Lead;
+use App\Models\Tenant;
 use App\Models\User;
 use App\Policies\LeadPolicy;
 use App\Services\Lead\AssignmentService;
 use App\Services\Lead\LeadService;
+use App\Services\Webhook\OutboundWebhookService;
 use App\Support\ApiResponse;
 use App\Support\AuditLogger;
 use Illuminate\Http\JsonResponse;
@@ -23,6 +25,7 @@ class LeadController extends Controller
     public function __construct(
         private readonly LeadService $service,
         private readonly AssignmentService $assignment,
+        private readonly OutboundWebhookService $webhooks,
     ) {
         Gate::policy(Lead::class, LeadPolicy::class);
     }
@@ -70,6 +73,19 @@ class LeadController extends Controller
 
         if ($request->filled('estimated_value')) {
             $lead->forceFill(['estimated_value' => $request->float('estimated_value')])->save();
+
+            $tenant = Tenant::query()
+                ->withoutGlobalScope('tenant')
+                ->find($lead->tenant_id);
+
+            if ($tenant) {
+                $this->webhooks->dispatch($tenant, 'lead.updated', [
+                    'lead_id' => $lead->id,
+                    'estimated_value' => (float) $lead->estimated_value,
+                    'customer_id' => $lead->customer_id,
+                    'product_id' => $lead->product_id,
+                ]);
+            }
         }
 
         return ApiResponse::success(new LeadResource($lead->fresh(['customer', 'product', 'assignedUser'])));

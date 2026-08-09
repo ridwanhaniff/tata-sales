@@ -1,58 +1,97 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# TATA Sales — Multi-Tenant Sales & CRM Engine
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Sistem penjualan multi-tenant (SaaS) dengan pipeline lead, landing page builder, WhatsApp integration, agent AI (intent/qualification/follow-up/handoff), quotation engine, voucher & promo, analytics, dan webhook in/out — berbasis Laravel + PostgreSQL (Row-Level Security untuk isolasi tenant).
 
-## About Laravel
+## Fitur utama
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+- **Lead pipeline**: capture (form/WA/chat/API/CRM), scoring otomatis, assignment otomatis, state machine `NEW → CONTACTED → QUALIFIED → PROPOSAL → NEGOTIATION → WON/LOST` (+ custom pipeline per tenant).
+- **Landing page builder**: section blocks (hero, banner, produk, FAQ), render publik via subdomain tenant (`/l/{slug}`), SEO, event tracking.
+- **WhatsApp**: abstraction provider (`echo` dev / `meta` Cloud API), webhook pesan masuk & status keluar, CTA `wa.me`.
+- **Agent AI**: Intent, Qualification, Follow-up, Handoff — tool-based, tenant context di-inject dari server (bukan dari LLM).
+- **Quotation engine**: draft → sent → viewed → accepted/rejected/expired, link publik per token, integrasi state machine lead.
+- **Webhook**: inbound (WA/payment/CRM) dengan HMAC + idempotency; outbound (`lead.created`, `lead.updated`, `deal.won`, `deal.lost`, `quotation.*`, `notification.sent`) via queue + retry/backoff.
+- **Penunjang**: voucher, promo, kalkulator, campaign + UTM attribution, follow-up otomatis, workflow, knowledge base, sales team & target, dashboard & analytics.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## Persyaratan
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+| Tool | Versi |
+|---|---|
+| PHP | 8.3+ (dikembangkan di 8.5) |
+| Composer | 2.x |
+| PostgreSQL | 14+ (RLS membutuhkan superuser saat setup awal) |
+| Node.js | 20+ |
 
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+## Setup (lokal)
 
 ```bash
-composer require laravel/boost --dev
+# 1. Dependensi
+composer install
+npm install
 
-php artisan boost:install
+# 2. Environment
+cp .env.example .env
+php artisan key:generate
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Konfigurasi `.env` (contoh):
 
-## Contributing
+```env
+APP_URL=http://localhost
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_DATABASE=tata_sales
+DB_USERNAME=tata_app
+DB_PASSWORD=tata_app_dev
+QUEUE_CONNECTION=database
+```
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+### Database & RLS
 
-## Code of Conduct
+Isolasi tenant memakai PostgreSQL **Row-Level Security**. Setup sekali lewat superuser Postgres:
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+```sql
+CREATE DATABASE tata_sales;
+-- role & grant dibuat otomatis oleh migration 000019/000020,
+-- tapi pastikan user migrasi punya CREATEROLE
+```
 
-## Security Vulnerabilities
+> **Dev lokal**: untuk queue worker / scheduler / seeding CLI, role aplikasi butuh akses penuh tanpa RLS (context tenant hanya di-set per-request HTTP oleh middleware):
+> ```sql
+> ALTER ROLE tata_app BYPASSRLS;   -- hanya untuk development!
+> ```
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+### Migrasi, seed, build, jalankan
 
-## License
+```bash
+php artisan migrate --seed          # seeder: tenant demo-auto + tenant-b, user demo, pipeline, landing, kalkulator
+npm run build                       # atau npm run dev
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+php artisan serve --port=8000       # web server
+php artisan queue:work --queue=default   # worker (webhook, follow-up)
+php artisan schedule:work           # scheduler: followups:send, quotations:expire
+```
+
+### Kredensial demo
+
+- Owner: `owner@demo.tatasales.test` / `password`
+- Sales: `sales@demo.tatasales.test` / `password`
+
+Landing page demo: `http://127.0.0.1:8000/l/home` (tenant `demo-auto` diset `domain=127.0.0.1` di seeder agar resolusi tenant lokal berfungsi).
+
+## Testing
+
+```bash
+php artisan test        # 394+ test (Feature + Unit)
+vendor/bin/pint         # code style
+```
+
+## Arsitektur
+
+- Multi-tenant: tabel tenant-scoped + RLS `app.tenant_id` (per-request via middleware), Eloquent global scope `tenant`.
+- Kontrak API: `docs/03-api-contract.md`. State machine: `docs/06-lead-state-machine.md`. Sprint plan: `docs/07-sprint-plan.md`.
+- Webhook keluar dikonfigurasi per tenant via `tenants.settings.webhook.{url,secret}`; masuk via `tenants.settings.webhook.inbound_secret`.
+
+## Lisensi
+
+Proprietary — hak cipta pemilik proyek.

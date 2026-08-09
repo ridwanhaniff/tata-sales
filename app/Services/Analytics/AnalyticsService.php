@@ -6,7 +6,9 @@ use App\Models\Campaign;
 use App\Models\CampaignEvent;
 use App\Models\Lead;
 use App\Models\LeadEvent;
+use App\Models\PipelineStage;
 use App\Models\Product;
+use App\Models\Quotation;
 use App\Models\Tenant;
 use Illuminate\Support\Facades\DB;
 
@@ -136,5 +138,144 @@ class AnalyticsService
             'name' => $campaigns[$row->campaign_id] ?? 'Kampanye dihapus',
             'leads' => (int) $row->total,
         ])->values()->all();
+    }
+
+    /**
+     * Win rate + nilai revenue won, keseluruhan dan per campaign (§95 Sprint 12).
+     */
+    public function winRate(Tenant $tenant): array
+    {
+        $total = Lead::query()->where('tenant_id', $tenant->id)->count();
+        $won = Lead::query()->where('tenant_id', $tenant->id)->where('status', 'WON')->count();
+        $wonValue = Lead::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('status', 'WON')
+            ->sum('estimated_value');
+
+        $byCampaign = Campaign::query()
+            ->where('tenant_id', $tenant->id)
+            ->get()
+            ->map(function (Campaign $campaign) use ($tenant) {
+                $byCampaignRow = Lead::query()
+                    ->where('tenant_id', $tenant->id)
+                    ->where('campaign_id', $campaign->id)
+                    ->selectRaw('count(*) as total, count(*) FILTER (WHERE status = ?) as won', ['WON'])
+                    ->first();
+
+                $total = (int) $byCampaignRow->total;
+
+                return [
+                    'campaign_id' => $campaign->id,
+                    'name' => $campaign->name,
+                    'leads' => $total,
+                    'won' => (int) $byCampaignRow->won,
+                    'win_rate' => $total > 0
+                        ? round(($byCampaignRow->won / $total) * 100, 1)
+                        : 0.0,
+                ];
+            })
+            ->values()
+            ->all();
+
+        return [
+            'total_leads' => (int) $total,
+            'won' => (int) $won,
+            'win_rate' => $total > 0 ? round(($won / $total) * 100, 1) : 0.0,
+            'won_value' => (float) $wonValue,
+            'by_campaign' => $byCampaign,
+        ];
+    }
+
+    /**
+     * Nilai pipeline per stage lead (§95 Sprint 12).
+     */
+    public function pipeline(Tenant $tenant): array
+    {
+        $stages = PipelineStage::query()
+            ->where('tenant_id', $tenant->id)
+            ->orderBy('sort_order')
+            ->get();
+
+        $rows = Lead::query()
+            ->where('tenant_id', $tenant->id)
+            ->select('status')
+            ->selectRaw('count(*) as total, COALESCE(SUM(estimated_value), 0) as value')
+            ->groupBy('status')
+            ->get()
+            ->keyBy('status');
+
+        $data = [];
+
+        foreach ($stages as $stage) {
+            $row = $rows[$stage->key] ?? null;
+
+            $data[] = [
+                'key' => $stage->key,
+                'label' => $stage->label,
+                'leads' => $row ? (int) $row->total : 0,
+                'value' => $row ? (float) $row->value : 0.0,
+            ];
+        }
+
+        return [
+            'stages' => $data,
+            'total_open_value' => (float) $rows->sum(fn ($row) => in_array($row->status, ['WON', 'LOST'], true) ? 0 : (float) $row->value),
+        ];
+    }
+
+    /**
+     * ROI kampanye: budget vs nilai won yang ter-attribusi (§95 Sprint 12).
+     */
+    public function campaignRoi(Tenant $tenant): array
+    {
+        $campaigns = Campaign::query()
+            ->where('tenant_id', $tenant->id)
+            ->get();
+
+        $rows = Lead::query()
+            ->where('tenant_id', $tenant->id)
+            ->whereNotNull('campaign_id')
+            ->select('campaign_id')
+            ->selectRaw('count(*) as total_leads')
+            ->selectRaw('count(*) FILTER (WHERE status = ?) as won_leads', ['WON'])
+            ->selectRaw('COALESCE(SUM(estimated_value) FILTER (WHERE status = ?), 0) as won_value', ['WON'])
+            ->groupBy('campaign_id')
+            ->get()
+            ->keyBy('campaign_id');
+
+        $quotations = Quotation::query()
+            ->where('tenant_id', $tenant->id)
+            ->where('status', 'accepted')
+            ->whereNotNull('lead_id')
+            ->pluck('lead_id');
+
+        $wonByQuote = Lead::query()
+            ->where('tenant_id', $tenant->id)
+            ->whereIn('id', $quotations)
+            ->whereNotNull('campaign_id')
+            ->select('campaign_id')
+            ->selectRaw('COALESCE(SUM(estimated_value), 0) as value')
+            ->groupBy('campaign_id')
+            ->get()
+            ->keyBy('campaign_id');
+
+        return $campaigns->map(function (Campaign $campaign) use ($rows, $wonByQuote) {
+            $budget = (float) ($campaign->budget ?? 0);
+            $row = $rows[$campaign->id] ?? null;
+            $wonValue = (float) ($wonByQuote[$campaign->id]->value ?? ($row->won_value ?? 0));
+
+            return [
+                'campaign_id' => $campaign->id,
+                'name' => $campaign->name,
+                'budget' => $budget,
+                'leads' => $row ? (int) $row->total_leads : 0,
+                'won_leads' => $row ? (int) $row->won_leads : 0,
+                'won_value' => $wonValue,
+                'roi' => $budget > 0 ? round(($wonValue / $budget) * 100, 1) : 0.0,
+                'roi_potential' => $budget > 0
+                    ? round(((float) ($row->won_value ?? 0) / $budget) * 100, 1)
+                    : 0.0,
+            ];
+        })->values()->all();
     }
 }

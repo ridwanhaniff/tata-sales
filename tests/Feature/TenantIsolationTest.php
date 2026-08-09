@@ -9,6 +9,8 @@ use App\Models\Campaign;
 use App\Models\CampaignEvent;
 use App\Models\CampaignSource;
 use App\Models\Customer;
+use App\Models\Followup;
+use App\Models\FollowupStep;
 use App\Models\LandingPage;
 use App\Models\Lead;
 use App\Models\LeadAssignment;
@@ -26,6 +28,8 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Models\Voucher;
 use App\Models\VoucherUsage;
+use App\Models\Workflow;
+use App\Models\WorkflowRun;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -138,6 +142,10 @@ class TenantIsolationTest extends TestCase
         PipelineStage::create(['tenant_id' => $this->tenantA->id, 'key' => 'NEW', 'label' => 'New']);
         $voucher = Voucher::factory()->for($this->tenantA)->create();
         VoucherUsage::create(['tenant_id' => $this->tenantA->id, 'voucher_id' => $voucher->id, 'customer_id' => $customer->id]);
+        $workflow = Workflow::create(['tenant_id' => $this->tenantA->id, 'name' => 'WF A', 'trigger_event' => 'lead_created', 'status' => 'active', 'definition' => []]);
+        WorkflowRun::create(['tenant_id' => $this->tenantA->id, 'workflow_id' => $workflow->id, 'lead_id' => $lead->id, 'status' => 'completed', 'started_at' => now()]);
+        FollowupStep::create(['tenant_id' => $this->tenantA->id, 'name' => 'Fo A', 'trigger_event' => 'lead_created', 'delay_minutes' => 60, 'message' => 'Hi', 'status' => 'active']);
+        Followup::create(['tenant_id' => $this->tenantA->id, 'lead_id' => $lead->id, 'status' => 'pending', 'channel' => 'whatsapp', 'scheduled_at' => now()]);
 
         app()->instance('currentTenant', $this->tenantB);
 
@@ -152,6 +160,10 @@ class TenantIsolationTest extends TestCase
         $this->assertSame(0, Notification::count());
         $this->assertSame(0, Voucher::count());
         $this->assertSame(0, VoucherUsage::count());
+        $this->assertSame(0, Workflow::count());
+        $this->assertSame(0, WorkflowRun::count());
+        $this->assertSame(0, FollowupStep::count());
+        $this->assertSame(0, Followup::count());
         $this->assertSame(0, $lead2->calculatorSessions()->count());
         $this->assertSame(0, $lead->events()->count());
     }

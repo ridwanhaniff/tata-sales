@@ -30,5 +30,17 @@ class AppServiceProvider extends ServiceProvider
                 sha1($request->ip().'|'.$request->header('X-Tenant-ID', '').'|'.$phone)
             );
         });
+
+        // Rate limit chat AI publik per IP + phone (§119)
+        RateLimiter::for('chat', function (Request $request) {
+            $phone = $request->string('customer_phone')->toString();
+
+            return Limit::perMinute(20)->by(
+                sha1($request->ip().'|'.$request->header('X-Tenant-ID', '').'|'.$phone)
+            );
+        });
+
+        // Rate limit link publik quotation (view + respond) §99 Sprint 12
+        RateLimiter::for('quotes', fn (Request $request) => Limit::perMinute(30)->by($request->ip()));
     }
 }

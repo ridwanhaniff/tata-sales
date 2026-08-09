@@ -17,10 +17,10 @@ return new class extends Migration
             $table->uuid('assigned_to')->nullable();
             $table->string('status', 20)->default('pending');
             $table->string('channel', 20)->default('whatsapp');
-            $table->timestampTz('scheduled_at');
-            $table->timestampTz('sent_at')->nullable();
+            $table->timestamp('scheduled_at');
+            $table->timestamp('sent_at')->nullable();
             $table->text('message')->nullable();
-            $table->timestampTz('created_at')->nullable()->useCurrent();
+            $table->timestamp('created_at')->nullable()->useCurrent();
 
             $table->foreign('tenant_id')->references('id')->on('tenants')->onDelete('cascade');
             $table->foreign('lead_id')->references('id')->on('leads')->onDelete('cascade');

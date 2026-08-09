@@ -6,12 +6,55 @@ use App\Models\Product;
 use App\Models\ProductVariant;
 use App\Support\AuditLogger;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class ProductService
 {
+    /**
+     * Pencarian deterministic (§64) — exact/filter match di kolom produk,
+     * bukan rekomendasi AI. Dipakai product agent via tool search_products.
+     */
+    public function search(string $query = '', ?string $category = null, int|float|null $budgetMax = null, int $limit = 8): Collection
+    {
+        return Product::query()
+            ->where('status', 'published')
+            ->whereNotNull('published_at')
+            ->when($query !== '', function ($q) use ($query) {
+                $q->where(function ($q) use ($query) {
+                    $q->where('name', 'ilike', '%'.$query.'%')
+                        ->orWhere('short_description', 'ilike', '%'.$query.'%')
+                        ->orWhere('description', 'ilike', '%'.$query.'%');
+                });
+            })
+            ->when($category !== null && $category !== '', function ($q) use ($category) {
+                $q->whereHas('category', fn ($c) => $c
+                    ->where('slug', $category)
+                    ->orWhere('name', 'ilike', '%'.$category.'%'));
+            })
+            ->when($budgetMax !== null, fn ($q) => $q->where('base_price', '<=', (int) $budgetMax))
+            ->with(['category', 'attributes', 'variants'])
+            ->orderByDesc('featured')
+            ->orderBy('base_price')
+            ->limit(max(1, min($limit, 50)))
+            ->get();
+    }
+
+    /**
+     * Detail satu produk published (untuk tool get_product). Tidak
+     * mengembalikan produk tenant lain — global scope BelongsToTenant.
+     */
+    public function find(string $productId): ?Product
+    {
+        return Product::query()
+            ->where('status', 'published')
+            ->whereNotNull('published_at')
+            ->with(['category', 'attributes', 'variants', 'images'])
+            ->find($productId);
+    }
+
     public function create(array $data, ?string $tenantId = null): Product
     {
         $data = $this->prepare($data, $tenantId);

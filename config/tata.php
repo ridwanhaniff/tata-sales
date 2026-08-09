@@ -48,14 +48,24 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | WhatsApp CTA (§24)
+    | WhatsApp CTA (§24) + WhatsApp Business API (§25, Sprint 12)
     |--------------------------------------------------------------------------
-    | Nomor WA default tenant dari tenants.settings.whatsapp_phone;
-    | fallback di sini bila belum di-set.
+    |
+    | - driver: `echo` (default, dev/test) atau `meta` (Cloud API riil).
+    | - meta: token system user, phone_number_id nomor bisnis pengirim.
+    | - base_url CTA wa.me tetap dipakai landing page, provider dipakai
+    |   untuk pesan keluar (follow-up, quotation).
     */
 
     'whatsapp' => [
         'default_phone' => env('WHATSAPP_DEFAULT_PHONE', '6280000000000'),
         'base_url' => 'https://wa.me/',
+        'driver' => env('WHATSAPP_DRIVER', 'echo'),
+        'meta' => [
+            'token' => env('WHATSAPP_META_TOKEN'),
+            'phone_number_id' => env('WHATSAPP_META_PHONE_NUMBER_ID'),
+            'graph_version' => env('WHATSAPP_META_GRAPH_VERSION', 'v22.0'),
+            'graph_base_url' => 'https://graph.facebook.com',
+        ],
     ],
 ];

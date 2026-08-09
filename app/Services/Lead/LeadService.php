@@ -13,6 +13,9 @@ use App\Models\Notification;
 use App\Models\PipelineStage;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\FollowUp\FollowUpService;
+use App\Services\Webhook\OutboundWebhookService;
+use App\Services\Workflow\WorkflowEngine;
 use App\Support\AuditLogger;
 use App\Support\PhoneNormalizer;
 use Illuminate\Http\Request;
@@ -27,6 +30,9 @@ class LeadService
         private readonly LeadScoringService $scoring,
         private readonly AssignmentService $assignment,
         private readonly AttributionService $attribution,
+        private readonly WorkflowEngine $workflow,
+        private readonly FollowUpService $followUps,
+        private readonly OutboundWebhookService $webhooks,
     ) {}
 
     /**
@@ -120,23 +126,43 @@ class LeadService
                 'attribution' => $attribution['data'],
             ]);
 
+            $this->logEvent($lead, 'lead_created', [
+                'source' => $lead->source,
+                'product_id' => $lead->product_id,
+                'campaign_id' => $lead->campaign_id,
+                'attribution' => $attribution['data'],
+            ]);
+
             $this->scoring->apply($lead, $context);
 
             $assigned = null;
             if (empty($data['skip_assignment'])) {
-                $sales = $this->assignment->assignRoundRobin($lead);
+                $result = $this->assignment->assign($lead);
+                $sales = $result['sales'];
                 if ($sales) {
                     $this->logEvent($lead, 'sales_assigned', [
                         'assigned_to' => $sales->id,
-                        'method' => 'round_robin',
+                        'method' => $result['method'],
                     ]);
                     $this->notifySales($lead, $sales);
                     $assigned = $this->assignedSummary($lead);
                 }
             }
 
+            $fresh = $lead->fresh(['customer', 'product', 'assignedUser']);
+            $this->workflow->trigger('lead_created', $fresh);
+            $this->followUps->scheduleFor($fresh, 'lead_created');
+
+            $this->webhooks->dispatch($tenant, 'lead.created', [
+                'lead_id' => $lead->id,
+                'status' => $lead->status,
+                'product_id' => $lead->product_id,
+                'score' => $lead->score,
+                'customer_phone' => $customer->phone,
+            ]);
+
             return [
-                'lead' => $lead->fresh(['customer', 'product', 'assignedUser']),
+                'lead' => $fresh,
                 'created' => true,
                 'assigned_to' => $assigned,
             ];
@@ -217,7 +243,30 @@ class LeadService
 
         AuditLogger::log('lead.status_changed', 'lead', $lead->id, ['status' => $from], ['status' => $to]);
 
-        return $lead->fresh();
+        $fresh = $lead->fresh(['customer', 'product', 'assignedUser']);
+        $this->workflow->trigger('lead_'.strtolower($to), $fresh);
+        $this->followUps->scheduleFor($fresh, 'lead_'.strtolower($to));
+
+        if (in_array($to, ['WON', 'LOST'], true) && $tenant) {
+            $this->webhooks->dispatch($tenant, 'deal.'.strtolower($to), [
+                'lead_id' => $lead->id,
+                'status' => $to,
+                'customer_id' => $lead->customer_id,
+                'product_id' => $lead->product_id,
+                'score' => $lead->score,
+            ]);
+        } elseif ($tenant) {
+            $this->webhooks->dispatch($tenant, 'lead.updated', [
+                'lead_id' => $lead->id,
+                'from' => $from,
+                'to' => $to,
+                'customer_id' => $lead->customer_id,
+                'product_id' => $lead->product_id,
+                'score' => $lead->score,
+            ]);
+        }
+
+        return $fresh;
     }
 
     public function addNote(Lead $lead, string $content, ?User $actor = null): Note

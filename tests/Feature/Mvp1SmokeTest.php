@@ -3,9 +3,12 @@
 namespace Tests\Feature;
 
 use App\Models\Calculator;
+use App\Models\Followup;
+use App\Models\FollowupStep;
 use App\Models\Product;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Models\Workflow;
 use Database\Seeders\PipelineStageSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -123,5 +126,75 @@ class Mvp1SmokeTest extends TestCase
             ->assertJsonPath('data.total_leads', 1)
             ->assertJsonPath('data.calculator_completion', 1)
             ->assertJsonCount(1, 'data.top_products');
+    }
+
+    /**
+     * Ekstensi MVP2 (§142 item 18): workflow dasar + follow-up terjadwal +
+     * notifikasi sampai ke sales.
+     */
+    public function test_workflow_and_followup_pipeline(): void
+    {
+        $owner = User::factory()->for($this->tenant)->role('owner')->create();
+        $sales = User::factory()->for($this->tenant)->role('sales')->create();
+
+        $workflow = Workflow::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Welcome workflow',
+            'trigger_event' => 'lead_created',
+            'status' => 'active',
+            'definition' => [],
+        ]);
+        $workflow->nodes()->create(['tenant_id' => $this->tenant->id, 'node_type' => 'trigger', 'config' => [], 'sort_order' => 0]);
+        $workflow->nodes()->create(['tenant_id' => $this->tenant->id, 'node_type' => 'action', 'config' => ['action' => 'create_followup', 'message' => 'Halo {customer_name}, ini {product_name} impian Anda?', 'delay_minutes' => 5], 'sort_order' => 1]);
+        $workflow->nodes()->create(['tenant_id' => $this->tenant->id, 'node_type' => 'end', 'config' => [], 'sort_order' => 2]);
+
+        FollowupStep::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Follow-up awal',
+            'trigger_event' => 'lead_created',
+            'delay_minutes' => 30,
+            'message' => 'Halo {customer_name}, kabar baik?',
+            'action' => 'create_followup',
+            'sort_order' => 0,
+            'status' => 'active',
+        ]);
+
+        $this->actingAs($owner);
+        $this->withHeader('X-Tenant-ID', $this->tenant->id);
+
+        $this->postJson('/api/v1/leads', [
+            'customer' => ['name' => 'Rudi', 'phone' => '081298765431'],
+            'source' => 'form',
+            'consent_marketing' => true,
+        ])->assertCreated();
+
+        $this->assertDatabaseHas('workflow_runs', [
+            'tenant_id' => $this->tenant->id,
+            'status' => 'completed',
+        ]);
+
+        $this->assertDatabaseHas('followups', [
+            'tenant_id' => $this->tenant->id,
+            'channel' => 'whatsapp',
+            'status' => 'pending',
+        ]);
+
+        $this->assertSame(2, Followup::query()->count());
+
+        $this->travel(2)->hours();
+        $this->artisan('followups:send')->assertSuccessful();
+
+        $this->assertDatabaseHas('followups', [
+            'tenant_id' => $this->tenant->id,
+            'status' => 'sent',
+        ]);
+
+        $this->assertDatabaseHas('notifications', [
+            'tenant_id' => $this->tenant->id,
+            'user_id' => $sales->id,
+            'type' => 'followup_sent',
+        ]);
+
+        $this->assertSame(0, Followup::query()->where('status', 'pending')->count());
     }
 }

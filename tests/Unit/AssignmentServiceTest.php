@@ -66,8 +66,8 @@ class AssignmentServiceTest extends TestCase
 
         $selected = $this->service->assignRoundRobin($lead);
 
-        $this->assertNotNull($selected);
-        $this->assertSame($salesC->id, $selected->id);
+        $this->assertNotNull($selected['sales']);
+        $this->assertSame($salesC->id, $selected['sales']->id);
         $this->assertSame($salesC->id, $lead->fresh()->assigned_to);
     }
 
@@ -83,14 +83,14 @@ class AssignmentServiceTest extends TestCase
 
         $selected = $this->service->assignRoundRobin($lead);
 
-        $this->assertSame($salesB->id, $selected->id);
+        $this->assertSame($salesB->id, $selected['sales']->id);
     }
 
     public function test_round_robin_returns_null_without_sales_users(): void
     {
         $lead = $this->makeLead();
 
-        $this->assertNull($this->service->assignRoundRobin($lead));
+        $this->assertNull($this->service->assignRoundRobin($lead)['sales']);
         $this->assertNull($lead->fresh()->assigned_to);
     }
 
@@ -108,7 +108,7 @@ class AssignmentServiceTest extends TestCase
 
         $selected = $this->service->assignRoundRobin($lead);
 
-        $this->assertSame($salesB->id, $selected->id);
+        $this->assertSame($salesB->id, $selected['sales']->id);
     }
 
     public function test_manual_assign_records_assignment_history(): void
