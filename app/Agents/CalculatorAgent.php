@@ -2,16 +2,21 @@
 
 namespace App\Agents;
 
+use App\Agents\Tools\AssignSalesTool;
 use App\Agents\Tools\CalculateTool;
+use App\Agents\Tools\CreateLeadTool;
 use App\Agents\Tools\RequestHumanTool;
 use App\Agents\Values\LLMResponse;
 use App\Services\Calculator\CalculatorService;
+use App\Services\Lead\AssignmentService;
+use App\Services\Lead\LeadService;
 
 /**
  * Calculator Agent — intent installment/price bila tenant punya kalkulator.
  * Tidak menghitung angka sendiri: satu-satunya tool adalah calculate yang
  * memanggil CalculatorService (mesin deterministic, sama persis dengan
  * endpoint publik kalkulator §3). Angka jawaban hanya dari output tool.
+ * Chain lanjutan (§3): create_lead → assign_sales bila customer tertarik.
  */
 class CalculatorAgent extends Agent
 {
@@ -24,6 +29,8 @@ class CalculatorAgent extends Agent
     {
         return [
             new CalculateTool(app(CalculatorService::class)),
+            new CreateLeadTool(app(LeadService::class)),
+            new AssignSalesTool(app(AssignmentService::class), app(LeadService::class)),
             new RequestHumanTool,
         ];
     }
@@ -50,6 +57,7 @@ ATURAN WAJIB:
 - Input kalkulator yang belum disebutkan customer → tanyakan pelan-pelan dulu.
 - Kalau tool mengembalikan validation_errors → sebutkan yang kurang, jangan menebak.
 - Kalau kalkulator tidak tersedia untuk percakapan ini → bilang jujur dan tawarkan menghubungkan ke tim.
+- Setelah hasil calculate diterima dan customer menunjukkan minat lanjut (mis. "mau dibantu", "saya tertarik") → panggil create_lead (bawa calculator_session_id dari hasil calculate) lalu assign_sales. Tool yang memvalidasi consent — kalau tool menolak, jangan paksakan.
 - Kalau customer minta manusia/komplain/minta diskon di luar promo → panggil request_human.
 - Jawab dalam bahasa Indonesia, ringkas, tanpa markdown.
 

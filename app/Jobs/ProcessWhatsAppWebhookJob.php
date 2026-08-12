@@ -5,9 +5,12 @@ namespace App\Jobs;
 use App\Models\Conversation;
 use App\Models\ConversationMessage;
 use App\Models\Customer;
+use App\Models\Lead;
 use App\Models\Tenant;
 use App\Models\WebhookEvent;
+use App\Services\Conversation\ConversationService;
 use App\Services\Lead\LeadService;
+use App\Services\WhatsApp\WhatsAppService;
 use App\Support\PhoneNormalizer;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -17,7 +20,9 @@ use Illuminate\Support\Facades\Log;
 /**
  * Proses webhook WA masuk: resolve/create customer → conversation →
  * lead (hanya bila consent ada) → pipeline lead penuh (§91: jangan
- * asumsikan consent; tanpa consent, percakapan tetap tercatat).
+ * asumsikan consent; tanpa consent, percakapan tetap tercatat) →
+ * balas customer lewat turn AI yang sama dengan channel webchat, dan
+ * kirim balasannya kembali via WhatsAppService (outbox §25 Sprint 12).
  */
 class ProcessWhatsAppWebhookJob implements ShouldQueue
 {
@@ -25,10 +30,15 @@ class ProcessWhatsAppWebhookJob implements ShouldQueue
 
     public function __construct(public WebhookEvent $event) {}
 
-    public function handle(LeadService $leads): void
+    public function handle(LeadService $leads, ConversationService $conversations, WhatsAppService $whatsapp): void
     {
         try {
-            DB::transaction(function () use ($leads) {
+            $tenant = null;
+            $customer = null;
+            $conversation = null;
+            $message = '';
+
+            DB::transaction(function () use ($leads, &$tenant, &$customer, &$conversation, &$message) {
                 $tenantId = $this->event->tenant_id;
 
                 if (! $tenantId) {
@@ -66,11 +76,13 @@ class ProcessWhatsAppWebhookJob implements ShouldQueue
 
                 $conversation = $this->findOrCreateConversation($tenantId, $customer, $lead?->id);
 
+                $message = (string) $payload['message'];
+
                 ConversationMessage::create([
                     'tenant_id' => $tenantId,
                     'conversation_id' => $conversation->id,
                     'sender_type' => ConversationMessage::SENDER_CUSTOMER,
-                    'content' => (string) $payload['message'],
+                    'content' => $message,
                     'metadata' => [
                         'provider_event_id' => $this->event->provider_event_id,
                         'provider' => $this->event->provider,
@@ -87,6 +99,10 @@ class ProcessWhatsAppWebhookJob implements ShouldQueue
                 }
             });
 
+            app()->instance('currentTenant', $tenant);
+
+            $this->respond($conversations, $whatsapp, $tenant, $customer, $conversation, $message);
+
             $this->event->markProcessed();
         } catch (\Throwable $e) {
             Log::error('webhook.whatsapp.process_failed', [
@@ -95,6 +111,52 @@ class ProcessWhatsAppWebhookJob implements ShouldQueue
             ]);
 
             $this->event->markFailed();
+        }
+    }
+
+    /**
+     * Turn AI (intent → agent → jawaban disimpan) lalu kirim balasan ke
+     * customer lewat jalur keluar tunggal. Gagal → jawaban fallback tetap
+     * terkirim; error di sini tidak menggagalkan pemrosesan inbound.
+     */
+    private function respond(
+        ConversationService $conversations,
+        WhatsAppService $whatsapp,
+        Tenant $tenant,
+        Customer $customer,
+        Conversation $conversation,
+        string $message,
+    ): void {
+        try {
+            $result = $conversations->turn($conversation, $tenant, $message);
+
+            $reply = (string) ($result['reply'] ?? '');
+
+            if ($reply === '') {
+                return;
+            }
+
+            $context = [
+                'conversation_id' => $conversation->id,
+                'intent' => $result['intent'] ?? null,
+                'source' => 'ai_reply',
+            ];
+
+            $lead = $conversation->lead_id
+                ? Lead::query()->withoutGlobalScope('tenant')->find($conversation->lead_id)
+                : null;
+
+            if ($lead) {
+                $whatsapp->send($lead, $reply, context: $context);
+            } else {
+                $whatsapp->sendToCustomer($customer, $tenant, $reply, $context);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('webhook.whatsapp.ai_reply_failed', [
+                'event_id' => $this->event->id,
+                'conversation_id' => $conversation->id,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 

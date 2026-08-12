@@ -73,7 +73,7 @@ class QualificationAgentTest extends TestCase
     {
         $agent = $this->agent(new FakeLLMProvider);
 
-        $this->assertSame(['update_lead', 'request_human'], array_map(fn ($t) => $t->name(), $agent->tools()));
+        $this->assertSame(['update_lead', 'create_lead', 'assign_sales', 'request_human'], array_map(fn ($t) => $t->name(), $agent->tools()));
     }
 
     public function test_agent_updates_qualified_fields_only(): void

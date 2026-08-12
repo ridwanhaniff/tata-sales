@@ -11,9 +11,9 @@ use App\Models\Lead;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Policies\LeadPolicy;
+use App\Services\Crm\CrmService;
 use App\Services\Lead\AssignmentService;
 use App\Services\Lead\LeadService;
-use App\Services\Webhook\OutboundWebhookService;
 use App\Support\ApiResponse;
 use App\Support\AuditLogger;
 use Illuminate\Http\JsonResponse;
@@ -25,7 +25,7 @@ class LeadController extends Controller
     public function __construct(
         private readonly LeadService $service,
         private readonly AssignmentService $assignment,
-        private readonly OutboundWebhookService $webhooks,
+        private readonly CrmService $crm,
     ) {
         Gate::policy(Lead::class, LeadPolicy::class);
     }
@@ -79,12 +79,13 @@ class LeadController extends Controller
                 ->find($lead->tenant_id);
 
             if ($tenant) {
-                $this->webhooks->dispatch($tenant, 'lead.updated', [
-                    'lead_id' => $lead->id,
-                    'estimated_value' => (float) $lead->estimated_value,
-                    'customer_id' => $lead->customer_id,
-                    'product_id' => $lead->product_id,
-                ]);
+                $this->crm->dispatch(
+                    $tenant,
+                    'lead.updated',
+                    $this->crm->factory()->lead('lead.updated', $lead, [
+                        'estimated_value' => (float) $lead->estimated_value,
+                    ])
+                );
             }
         }
 

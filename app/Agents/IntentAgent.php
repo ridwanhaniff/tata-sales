@@ -14,7 +14,8 @@ use App\Models\AiAgentLog;
  * agent/tool berikutnya di chain (Sprint 10).
  *
  * Label intent: price, availability, promotion, installment, location,
- * specification, comparison, purchase_intent, support, complaint.
+ * specification, comparison, purchase_intent, recommendation, support,
+ * complaint.
  */
 class IntentAgent extends Agent
 {
@@ -39,7 +40,7 @@ class IntentAgent extends Agent
 Kamu adalah pengelompokkan intent percakapan penjualan. Balas HANYA satu objek JSON tanpa teks lain:
 {"intent": "<label>", "confidence": 0.0-1.0}
 
-Label yang tersedia: price, availability, installment, promotion, location, specification, comparison, purchase_intent, support, complaint.
+Label yang tersedia: price, availability, installment, promotion, location, specification, comparison, purchase_intent, recommendation, support, complaint.
 - harga/cicilan/total → price|installment
 - ketersediaan stok → availability
 - diskon/promo → promotion
@@ -47,6 +48,7 @@ Label yang tersedia: price, availability, installment, promotion, location, spec
 - lokasi/showroom → location
 - keluhan/butuh manusia → complaint|support
 - tanda mau beli eksplisit → purchase_intent
+- minta rekomendasi/proposal produk sesuai budget → recommendation
 Kalau tidak yakin, confidence rendah.
 PROMPT;
 
@@ -87,8 +89,8 @@ PROMPT;
     {
         return [
             'price', 'availability', 'installment', 'promotion', 'location',
-            'specification', 'comparison', 'purchase_intent', 'support',
-            'complaint', 'unknown',
+            'specification', 'comparison', 'purchase_intent', 'recommendation',
+            'support', 'complaint', 'unknown',
         ];
     }
 }

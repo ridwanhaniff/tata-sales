@@ -4,6 +4,8 @@ use App\Http\Controllers\Api\V1\Admin\AnalyticsController;
 use App\Http\Controllers\Api\V1\Admin\CalculatorController as AdminCalculatorController;
 use App\Http\Controllers\Api\V1\Admin\CampaignController as AdminCampaignController;
 use App\Http\Controllers\Api\V1\Admin\ConversationController;
+use App\Http\Controllers\Api\V1\Admin\CrmDeliveryController;
+use App\Http\Controllers\Api\V1\Admin\CrmWebhookSettingController;
 use App\Http\Controllers\Api\V1\Admin\CustomerController;
 use App\Http\Controllers\Api\V1\Admin\FollowUpStepController;
 use App\Http\Controllers\Api\V1\Admin\KnowledgeBaseController;
@@ -183,6 +185,15 @@ Route::middleware(['auth:sanctum', 'role:owner,manager,sales'])->group(function 
 
 Route::middleware(['auth:sanctum', 'role:owner,manager'])->group(function () {
     Route::post('/admin/notifications', [NotificationController::class, 'send']);
+});
+
+Route::middleware(['auth:sanctum', 'role:super_admin,owner,manager'])->group(function () {
+    Route::get('/admin/settings/webhook', [CrmWebhookSettingController::class, 'show']);
+    Route::put('/admin/settings/webhook', [CrmWebhookSettingController::class, 'update']);
+    Route::post('/admin/settings/webhook/test', [CrmWebhookSettingController::class, 'test']);
+
+    Route::get('/admin/crm/deliveries', [CrmDeliveryController::class, 'index']);
+    Route::get('/admin/crm/deliveries/{delivery}', [CrmDeliveryController::class, 'show']);
 });
 
 Route::get('/products', [ProductController::class, 'index']);

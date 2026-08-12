@@ -2,14 +2,18 @@
 
 namespace Tests\Feature;
 
+use App\Agents\Contracts\LLMProvider;
 use App\Models\Conversation;
+use App\Models\ConversationMessage;
 use App\Models\Customer;
 use App\Models\Lead;
 use App\Models\Tenant;
 use App\Models\WebhookEvent;
+use App\Models\WhatsappMessage;
 use Database\Seeders\PipelineStageSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
+use Tests\Support\FakeLLMProvider;
 use Tests\TestCase;
 
 class WebhookInboundTest extends TestCase
@@ -47,6 +51,11 @@ class WebhookInboundTest extends TestCase
         ];
     }
 
+    private function withFakeLLM(FakeLLMProvider $fake): void
+    {
+        app()->instance(LLMProvider::class, $fake);
+    }
+
     public function test_signature_mismatch_is_rejected(): void
     {
         $this->postJson('/api/v1/webhooks/whatsapp', [
@@ -68,6 +77,11 @@ class WebhookInboundTest extends TestCase
 
     public function test_valid_webhook_creates_customer_conversation_and_message(): void
     {
+        $this->withFakeLLM(new FakeLLMProvider([
+            FakeLLMProvider::text('{"intent":"availability","confidence":0.95}'),
+            FakeLLMProvider::text('Avanza tersedia di showroom kami.'),
+        ]));
+
         $payload = [
             'provider_event_id' => 'wa-msg-0001',
             'phone' => '081298765432',
@@ -103,13 +117,36 @@ class WebhookInboundTest extends TestCase
         $this->assertSame('whatsapp', $lead->source);
         $this->assertSame('6281298765432', $lead->customer->phone);
 
-        $message = $conversation->messages()->firstOrFail();
-        $this->assertSame('customer', $message->sender_type);
-        $this->assertSame('Halo, mau tanya harga Avanza.', $message->content);
+        // pesan masuk + balasan AI tercatat di conversation
+        $this->assertSame(2, $conversation->messages()->count());
+        $reply = $conversation->messages()
+            ->where('sender_type', ConversationMessage::SENDER_AI)
+            ->firstOrFail();
+        $this->assertSame('Avanza tersedia di showroom kami.', $reply->content);
+        $this->assertSame('availability', $reply->intent);
+        $this->assertSame('product', $reply->metadata['agent']);
+
+        // balasan dikirim keluar via outbox WhatsApp (driver echo = sent)
+        $sent = WhatsappMessage::query()->firstOrFail();
+        $this->assertSame('6281298765432', $sent->to_phone);
+        $this->assertSame('Avanza tersedia di showroom kami.', $sent->message);
+        $this->assertSame('sent', $sent->status);
+        $this->assertSame($lead->id, $sent->lead_id);
+        $this->assertSame($conversation->id, $sent->payload['conversation_id']);
+        $this->assertSame('ai_reply', $sent->payload['source']);
     }
 
     public function test_duplicate_event_is_not_processed_twice(): void
     {
+        $this->withFakeLLM(new FakeLLMProvider([
+            FakeLLMProvider::text('{"intent":"unknown","confidence":0.2}'),
+            fn () => FakeLLMProvider::toolCall('request_human', [
+                'conversation_id' => Conversation::query()->first()->id,
+                'reason' => 'pesan tidak jelas',
+            ]),
+            FakeLLMProvider::text('Baik, saya hubungkan Anda dengan tim kami.'),
+        ]));
+
         $payload = [
             'provider_event_id' => 'wa-dup-0001',
             'phone' => '081298765433',
@@ -132,6 +169,11 @@ class WebhookInboundTest extends TestCase
 
     public function test_without_consent_no_lead_is_created_but_conversation_is_recorded(): void
     {
+        $this->withFakeLLM(new FakeLLMProvider([
+            FakeLLMProvider::text('{"intent":"availability","confidence":0.95}'),
+            FakeLLMProvider::text('Terima kasih sudah menghubungi kami.'),
+        ]));
+
         $payload = [
             'provider_event_id' => 'wa-no-consent',
             'phone' => '081298765434',
@@ -145,10 +187,24 @@ class WebhookInboundTest extends TestCase
         $this->assertSame(0, Lead::count());
         $this->assertSame(1, Conversation::count());
         $this->assertNull(Conversation::firstOrFail()->lead_id);
+
+        // tanpa lead, balasan AI tetap terkirim (lead_id nullable)
+        $sent = WhatsappMessage::query()->firstOrFail();
+        $this->assertSame('6281298765434', $sent->to_phone);
+        $this->assertSame('Terima kasih sudah menghubungi kami.', $sent->message);
+        $this->assertSame('sent', $sent->status);
+        $this->assertNull($sent->lead_id);
     }
 
     public function test_second_message_appends_to_existing_conversation(): void
     {
+        $this->withFakeLLM(new FakeLLMProvider([
+            FakeLLMProvider::text('{"intent":"availability","confidence":0.95}'),
+            FakeLLMProvider::text('Balasan pertama.'),
+            FakeLLMProvider::text('{"intent":"availability","confidence":0.95}'),
+            FakeLLMProvider::text('Balasan kedua.'),
+        ]));
+
         $first = [
             'provider_event_id' => 'wa-seq-1',
             'phone' => '081298765435',
@@ -167,8 +223,12 @@ class WebhookInboundTest extends TestCase
         $this->postJson('/api/v1/webhooks/whatsapp', $second, $this->headers('wa-seq-2', $second))->assertOk();
 
         $this->assertSame(1, Conversation::count());
-        $this->assertSame(2, Conversation::firstOrFail()->messages()->count());
         $this->assertSame(1, Lead::count());
+
+        $conversation = Conversation::firstOrFail();
+        $this->assertSame(2, $conversation->messages()->where('sender_type', 'customer')->count());
+        $this->assertSame(2, $conversation->messages()->where('sender_type', 'ai')->count());
+        $this->assertSame(2, WhatsappMessage::count());
     }
 
     public function test_payment_webhook_is_acknowledged_and_recorded(): void

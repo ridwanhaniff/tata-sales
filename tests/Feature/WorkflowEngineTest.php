@@ -2,10 +2,12 @@
 
 namespace Tests\Feature;
 
+use App\Agents\Contracts\LLMProvider;
 use App\Models\Customer;
 use App\Models\Followup;
 use App\Models\FollowupStep;
 use App\Models\Lead;
+use App\Models\Notification;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Models\Workflow;
@@ -15,6 +17,7 @@ use App\Models\WorkflowRun;
 use App\Services\Workflow\WorkflowEngine;
 use Database\Seeders\PipelineStageSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\FakeLLMProvider;
 use Tests\TestCase;
 
 class WorkflowEngineTest extends TestCase
@@ -187,12 +190,105 @@ class WorkflowEngineTest extends TestCase
         $this->assertSame('NEW', $lead->fresh()->status);
     }
 
-    public function test_ai_and_human_nodes_are_stubbed_as_skipped(): void
+    public function test_ai_node_runs_followup_agent_and_completes_run(): void
+    {
+        $step = FollowupStep::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Follow after lead',
+            'trigger_event' => 'lead_created',
+            'delay_minutes' => 60,
+            'message' => 'Halo {customer_name}, bagaimana kabarnya?',
+            'action' => 'create_followup',
+            'sort_order' => 0,
+            'status' => 'active',
+        ]);
+
+        $this->makeWorkflow('lead_created', [
+            ['node_type' => 'trigger'],
+            ['node_type' => 'ai', 'config' => ['agent' => 'followup', 'step_id' => $step->id]],
+            ['node_type' => 'end'],
+        ]);
+
+        $lead = $this->makeLead();
+
+        $fake = new FakeLLMProvider([
+            FakeLLMProvider::toolCall('create_followup', [
+                'lead_id' => $lead->id,
+                'step_id' => $step->id,
+                'message' => 'Halo, kami menindaklanjuti percakapan kita.',
+            ]),
+            FakeLLMProvider::text('Draft follow-up sudah saya jadwalkan.'),
+        ]);
+        app()->instance(LLMProvider::class, $fake);
+
+        $this->engine->trigger('lead_created', $lead);
+
+        $run = WorkflowRun::query()->firstOrFail();
+        $this->assertSame('completed', $run->status);
+
+        // Follow-up DRAFT dibuat agent, tidak pernah terkirim langsung
+        $followup = Followup::query()->first();
+        $this->assertNotNull($followup);
+        $this->assertSame('pending', $followup->status);
+        $this->assertSame('Halo, kami menindaklanjuti percakapan kita.', $followup->message);
+
+        $aiNode = WorkflowNode::where('node_type', 'ai')->firstOrFail();
+        $this->assertDatabaseHas('workflow_logs', [
+            'workflow_run_id' => $run->id,
+            'node_id' => $aiNode->id,
+            'status' => 'success',
+        ]);
+
+        $this->assertDatabaseHas('ai_agent_logs', [
+            'agent' => 'followup',
+            'tool_called' => 'create_followup',
+            'status' => 'success',
+        ]);
+    }
+
+    public function test_ai_node_failure_does_not_abort_run(): void
+    {
+        $step = FollowupStep::create([
+            'tenant_id' => $this->tenant->id,
+            'name' => 'Follow after lead',
+            'trigger_event' => 'lead_created',
+            'delay_minutes' => 60,
+            'message' => 'Halo {customer_name}, bagaimana kabarnya?',
+            'action' => 'create_followup',
+            'sort_order' => 0,
+            'status' => 'active',
+        ]);
+
+        $this->makeWorkflow('lead_created', [
+            ['node_type' => 'trigger'],
+            ['node_type' => 'ai', 'config' => ['agent' => 'followup', 'step_id' => $step->id]],
+            ['node_type' => 'end'],
+        ]);
+
+        $lead = $this->makeLead();
+
+        // LLM tanpa step → agent gagal; run workflow tidak boleh rollback
+        app()->instance(LLMProvider::class, new FakeLLMProvider);
+
+        $this->engine->trigger('lead_created', $lead);
+
+        $run = WorkflowRun::query()->firstOrFail();
+        $this->assertSame('completed', $run->status);
+        $this->assertSame(0, Followup::count());
+
+        $aiNode = WorkflowNode::where('node_type', 'ai')->firstOrFail();
+        $this->assertDatabaseHas('workflow_logs', [
+            'workflow_run_id' => $run->id,
+            'node_id' => $aiNode->id,
+            'status' => 'failed',
+        ]);
+    }
+
+    public function test_ai_without_supported_agent_is_skipped(): void
     {
         $this->makeWorkflow('lead_created', [
             ['node_type' => 'trigger'],
             ['node_type' => 'ai', 'config' => ['prompt' => '...']],
-            ['node_type' => 'human'],
             ['node_type' => 'end'],
         ]);
 
@@ -203,9 +299,104 @@ class WorkflowEngineTest extends TestCase
         $run = WorkflowRun::query()->firstOrFail();
         $this->assertSame('completed', $run->status);
 
-        $skipped = WorkflowLog::query()->where('status', 'skipped')->whereIn('node_id', WorkflowNode::pluck('id'))->get();
-        $this->assertCount(2, WorkflowLog::query()->where('status', 'skipped')->get());
         $this->assertDatabaseHas('workflow_logs', ['workflow_run_id' => $run->id, 'status' => 'skipped']);
+    }
+
+    public function test_human_node_pauses_run_waiting_for_sales_and_notifies(): void
+    {
+        $sales = User::factory()->for($this->tenant)->role('sales')->create();
+        $owner = User::factory()->for($this->tenant)->create(['role' => 'owner']);
+
+        $this->makeWorkflow('lead_created', [
+            ['node_type' => 'trigger'],
+            ['node_type' => 'human', 'config' => ['note' => 'Tindak lanjuti lead ini']],
+            ['node_type' => 'end'],
+        ]);
+
+        $lead = $this->makeLead(['assigned_to' => $sales->id]);
+
+        $this->engine->trigger('lead_created', $lead);
+
+        $run = WorkflowRun::query()->firstOrFail();
+        $this->assertSame(WorkflowRun::STATUS_WAITING_HUMAN, $run->status);
+        $this->assertNull($run->finished_at);
+
+        $humanNode = WorkflowNode::where('node_type', 'human')->firstOrFail();
+        $this->assertSame($humanNode->id, $run->current_node_id);
+
+        // Sales ditugasi + owner dinotifikasi
+        $notifications = Notification::where('type', 'workflow_human')->get();
+        $this->assertCount(2, $notifications);
+        $this->assertTrue($notifications->pluck('user_id')->contains($sales->id));
+        $this->assertTrue($notifications->pluck('user_id')->contains($owner->id));
+
+        $this->assertDatabaseHas('workflow_logs', [
+            'workflow_run_id' => $run->id,
+            'node_id' => $humanNode->id,
+            'status' => 'success',
+        ]);
+    }
+
+    public function test_human_node_is_hard_stop_before_later_nodes(): void
+    {
+        $this->makeWorkflow('lead_created', [
+            ['node_type' => 'trigger'],
+            ['node_type' => 'human'],
+            ['node_type' => 'action', 'config' => ['action' => 'create_followup', 'delay_minutes' => 60]],
+        ]);
+
+        $lead = $this->makeLead();
+
+        $this->engine->trigger('lead_created', $lead);
+
+        $run = WorkflowRun::query()->firstOrFail();
+        $this->assertSame(WorkflowRun::STATUS_WAITING_HUMAN, $run->status);
+        $this->assertSame(0, Followup::count());
+    }
+
+    public function test_resume_continues_from_human_node(): void
+    {
+        $this->makeWorkflow('lead_created', [
+            ['node_type' => 'trigger'],
+            ['node_type' => 'human'],
+            ['node_type' => 'action', 'config' => ['action' => 'create_followup', 'delay_minutes' => 60]],
+            ['node_type' => 'end'],
+        ]);
+
+        $lead = $this->makeLead();
+
+        $this->engine->trigger('lead_created', $lead);
+
+        $run = WorkflowRun::query()->firstOrFail();
+        $this->assertSame(WorkflowRun::STATUS_WAITING_HUMAN, $run->status);
+
+        $this->assertTrue($this->engine->resume($run));
+
+        $run->refresh();
+        $this->assertSame(WorkflowRun::STATUS_COMPLETED, $run->status);
+        $this->assertNull($run->current_node_id);
+        $this->assertNotNull($run->finished_at);
+
+        // Aksi setelah node human baru dieksekusi setelah resume
+        $followup = Followup::query()->firstOrFail();
+        $this->assertSame('pending', $followup->status);
+        $this->assertSame('whatsapp', $followup->channel);
+    }
+
+    public function test_resume_rejects_run_that_is_not_waiting_human(): void
+    {
+        $this->makeWorkflow('lead_created', [
+            ['node_type' => 'trigger'],
+        ]);
+
+        $lead = $this->makeLead();
+
+        $this->engine->trigger('lead_created', $lead);
+
+        $run = WorkflowRun::query()->firstOrFail();
+        $this->assertSame(WorkflowRun::STATUS_COMPLETED, $run->status);
+
+        $this->assertFalse($this->engine->resume($run));
     }
 
     public function test_delay_node_schedules_pending_followup(): void

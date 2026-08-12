@@ -60,12 +60,20 @@ class AnthropicProvider implements LLMProvider
         $startedAt = hrtime(true);
 
         try {
+            $curlOptions = [CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4];
+            $caFile = (string) config('llm.ca_file', '');
+            if ($caFile !== '' && is_file($caFile)) {
+                $curlOptions[CURLOPT_CAINFO] = $caFile;
+            }
+
             $response = Http::asJson()
                 ->withHeaders([
                     'x-api-key' => $this->apiKey,
                     'anthropic-version' => '2023-06-01',
                 ])
                 ->timeout($this->timeout)
+                ->connectTimeout($this->timeout)
+                ->withOptions(['curl' => $curlOptions])
                 ->post($this->baseUrl.'/messages', $payload)
                 ->throw();
         } catch (ConnectionException) {

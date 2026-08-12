@@ -65,6 +65,22 @@ class AssignmentService
     }
 
     /**
+     * Assign dengan strategi eksplisit (dipakai tool assign_sales).
+     * Strategi yang tidak dikenali → round_robin.
+     *
+     * @return array{sales: ?User, method: string}
+     */
+    public function assignByMethod(Lead $lead, string $method): array
+    {
+        return match ($method) {
+            self::METHOD_PRODUCT => $this->assignByProduct($lead),
+            self::METHOD_LOCATION => $this->assignByLocation($lead),
+            self::METHOD_WORKLOAD => $this->assignByWorkload($lead),
+            default => $this->assignRoundRobin($lead),
+        };
+    }
+
+    /**
      * @return array{sales: ?User, method: string}
      */
     private function assignByProduct(Lead $lead): array

@@ -4,15 +4,21 @@ namespace Tests\Feature\Chat;
 
 use App\Agents\Contracts\LLMProvider;
 use App\Models\AiAgentLog;
+use App\Models\Calculator;
+use App\Models\CalculatorSession;
 use App\Models\Campaign;
 use App\Models\Conversation;
 use App\Models\ConversationMessage;
 use App\Models\Customer;
 use App\Models\Lead;
+use App\Models\LeadEvent;
+use App\Models\Notification;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Promotion;
 use App\Models\Tenant;
+use App\Models\User;
+use App\Services\Conversation\ConversationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
 use Tests\Support\FakeLLMProvider;
@@ -112,10 +118,15 @@ class ChatFlowTest extends TestCase
         $this->assertSame(AiAgentLog::STATUS_SUCCESS, $productLog->status);
     }
 
-    public function test_complaint_goes_to_waiting_human_without_llm_reply(): void
+    public function test_complaint_goes_to_waiting_human_via_handoff_agent(): void
     {
         $fake = new FakeLLMProvider([
             FakeLLMProvider::text('{"intent":"complaint","confidence":0.99}'),
+            fn () => FakeLLMProvider::toolCall('request_human', [
+                'conversation_id' => Conversation::query()->first()->id,
+                'reason' => 'keluhan proses lambat',
+            ]),
+            FakeLLMProvider::text('Baik, saya hubungkan Anda dengan tim kami.'),
         ]);
         $this->withFakeLLM($fake);
 
@@ -127,8 +138,14 @@ class ChatFlowTest extends TestCase
         $conversation = Conversation::query()->first();
         $this->assertSame(Conversation::STATUS_WAITING_HUMAN, $conversation->status);
 
-        // Tidak ada jawaban AI; hanya fallback yang jujur
-        $this->assertSame(1, $fake->generateCalls);
+        // Jalur: intent → Handoff Agent (request_human) → balasan AI disusun LLM
+        $this->assertSame(3, $fake->generateCalls);
+        $this->assertDatabaseHas('ai_agent_logs', [
+            'agent' => 'handoff',
+            'tool_called' => 'request_human',
+            'status' => AiAgentLog::STATUS_SUCCESS,
+        ]);
+
         $aiMessage = ConversationMessage::where('conversation_id', $conversation->id)
             ->where('sender_type', 'ai')->first();
         $this->assertNotNull($aiMessage);
@@ -140,6 +157,11 @@ class ChatFlowTest extends TestCase
     {
         $fake = new FakeLLMProvider([
             FakeLLMProvider::text('{"intent":"unknown","confidence":0.2}'),
+            fn () => FakeLLMProvider::toolCall('request_human', [
+                'conversation_id' => Conversation::query()->first()->id,
+                'reason' => 'pesan tidak jelas',
+            ]),
+            FakeLLMProvider::text('Baik, saya hubungkan Anda dengan tim kami.'),
         ]);
         $this->withFakeLLM($fake);
 
@@ -147,6 +169,35 @@ class ChatFlowTest extends TestCase
         $response->assertOk();
         $response->assertJsonPath('data.status', Conversation::STATUS_WAITING_HUMAN);
         $response->assertJsonPath('data.intent', 'handoff');
+    }
+
+    public function test_guardrail_handoff_falls_back_deterministic_when_agent_fails(): void
+    {
+        // Handoff Agent gagal (LLM tidak punya step) → handoff deterministik
+        // + FALLBACK_REPLY tetap berjalan; percakapan tidak pernah macet.
+        $fake = new FakeLLMProvider([
+            FakeLLMProvider::text('{"intent":"complaint","confidence":0.99}'),
+        ]);
+        $this->withFakeLLM($fake);
+
+        $response = $this->chatRequest(['customer_phone' => '081555555555', 'message' => 'prosesnya lama sekali']);
+        $response->assertOk();
+        $response->assertJsonPath('data.status', Conversation::STATUS_WAITING_HUMAN);
+        $response->assertJsonPath('data.intent', 'handoff');
+        $response->assertJsonPath('data.reply', ConversationService::FALLBACK_REPLY);
+
+        $conversation = Conversation::query()->first();
+        $this->assertSame(Conversation::STATUS_WAITING_HUMAN, $conversation->status);
+
+        $system = $conversation->messages()
+            ->where('sender_type', ConversationMessage::SENDER_SYSTEM)
+            ->first();
+        $this->assertSame('guardrail', $system->metadata['source']);
+
+        $aiMessage = $conversation->messages()
+            ->where('sender_type', ConversationMessage::SENDER_AI)
+            ->first();
+        $this->assertSame(ConversationService::FALLBACK_REPLY, $aiMessage->content);
     }
 
     public function test_messages_reuse_active_conversation_for_same_phone(): void
@@ -211,6 +262,11 @@ class ChatFlowTest extends TestCase
     {
         $fake = new FakeLLMProvider([
             FakeLLMProvider::text('{"intent":"price","confidence":0.9}'),
+            fn () => FakeLLMProvider::toolCall('request_human', [
+                'conversation_id' => Conversation::query()->first()->id,
+                'reason' => 'customer minta nego harga',
+            ]),
+            FakeLLMProvider::text('Baik, saya hubungkan Anda dengan tim kami.'),
         ]);
         $this->withFakeLLM($fake);
 
@@ -221,7 +277,156 @@ class ChatFlowTest extends TestCase
         $response->assertJsonPath('data.status', Conversation::STATUS_WAITING_HUMAN);
         $response->assertJsonPath('data.intent', 'handoff');
 
-        $this->assertSame(1, $fake->generateCalls);
+        $this->assertSame(3, $fake->generateCalls);
+    }
+
+    public function test_recommendation_intent_routes_to_recommendation_agent(): void
+    {
+        $this->makeProduct();
+        Promotion::factory()->for($this->tenant)->create(['name' => 'Diskon Agustus']);
+
+        $fake = new FakeLLMProvider([
+            FakeLLMProvider::text('{"intent":"recommendation","confidence":0.92}'),
+            FakeLLMProvider::toolCall('search_products', ['query' => 'FRONX', 'budget_max' => 250_000_000]),
+            FakeLLMProvider::toolCall('get_promotion', []),
+            FakeLLMProvider::text('Rekomendasi: FRONX GLX dengan promo Diskon Agustus.'),
+        ]);
+        $this->withFakeLLM($fake);
+
+        $response = $this->chatRequest([
+            'customer_phone' => '081666666666',
+            'message' => 'Rekomendasikan mobil budget 250 juta untuk saya.',
+        ]);
+        $response->assertOk();
+        $response->assertJsonPath('data.intent', 'recommendation');
+        $response->assertJsonPath('data.status', Conversation::STATUS_AI_ACTIVE);
+        $response->assertJsonPath('data.reply', 'Rekomendasi: FRONX GLX dengan promo Diskon Agustus.');
+
+        $this->assertDatabaseHas('ai_agent_logs', [
+            'agent' => 'recommendation',
+            'tool_called' => 'search_products',
+            'status' => AiAgentLog::STATUS_SUCCESS,
+        ]);
+        $this->assertDatabaseHas('ai_agent_logs', [
+            'agent' => 'recommendation',
+            'tool_called' => 'get_promotion',
+            'status' => AiAgentLog::STATUS_SUCCESS,
+        ]);
+    }
+
+    public function test_purchase_intent_qualified_routes_to_recommendation_agent(): void
+    {
+        $product = $this->makeProduct();
+        $phone = '6281777777777';
+        $customer = Customer::factory()->for($this->tenant)->create(['phone' => $phone]);
+        $lead = Lead::factory()->create([
+            'tenant_id' => $this->tenant->id,
+            'customer_id' => $customer->id,
+            'status' => 'QUALIFIED',
+            'estimated_value' => 200_000_000,
+            'product_id' => $product->id,
+        ]);
+        Conversation::create([
+            'tenant_id' => $this->tenant->id,
+            'customer_id' => $customer->id,
+            'lead_id' => $lead->id,
+            'status' => Conversation::STATUS_AI_ACTIVE,
+            'channel' => 'webchat',
+            'context' => [],
+        ]);
+
+        $fake = new FakeLLMProvider([
+            FakeLLMProvider::text('{"intent":"purchase_intent","confidence":0.93}'),
+            FakeLLMProvider::toolCall('search_products', ['query' => 'FRONX', 'budget_max' => 200_000_000]),
+            FakeLLMProvider::text('Rekomendasi saya: FRONX GLX.'),
+        ]);
+        $this->withFakeLLM($fake);
+
+        $response = $this->chatRequest([
+            'customer_phone' => $phone,
+            'message' => 'Saya tertarik dengan FRONX, rekomendasikan yang cocok.',
+        ]);
+        $response->assertOk();
+        $response->assertJsonPath('data.intent', 'purchase_intent');
+        $response->assertJsonPath('data.status', Conversation::STATUS_AI_ACTIVE);
+
+        // Lead QUALIFIED + budget + produk → rekomendasi, bukan qualification lagi
+        $this->assertDatabaseHas('ai_agent_logs', [
+            'agent' => 'recommendation',
+            'tool_called' => 'search_products',
+            'status' => AiAgentLog::STATUS_SUCCESS,
+        ]);
+        $this->assertDatabaseMissing('ai_agent_logs', [
+            'agent' => 'qualification',
+        ]);
+    }
+
+    public function test_full_chain_calculator_create_lead_assign_sales(): void
+    {
+        $this->makeProduct();
+        $calculator = Calculator::factory()->for($this->tenant)->credit()->create();
+
+        $phone = '6281555555555';
+        $customer = Customer::factory()->for($this->tenant)->create([
+            'phone' => $phone,
+            'consent_marketing' => true,
+        ]);
+        $sales = User::factory()->for($this->tenant)->role(User::ROLE_SALES)->create(['status' => 'active']);
+
+        $fake = new FakeLLMProvider([
+            FakeLLMProvider::text('{"intent":"installment","confidence":0.95}'),
+            FakeLLMProvider::toolCall('calculate', [
+                'calculator_id' => $calculator->id,
+                'inputs' => ['price' => 249_500_000, 'dp' => 50_000_000, 'tenor' => 48, 'interest' => 8],
+            ]),
+            fn () => FakeLLMProvider::toolCall('create_lead', [
+                'calculator_session_id' => CalculatorSession::query()->latest('created_at')->value('id'),
+            ]),
+            fn () => FakeLLMProvider::toolCall('assign_sales', [
+                'lead_id' => Lead::query()->latest('created_at')->value('id'),
+            ]),
+            FakeLLMProvider::text('Simulasi selesai. Tim kami akan segera menghubungi Anda.'),
+        ]);
+        $this->withFakeLLM($fake);
+
+        $response = $this->chatRequest([
+            'customer_phone' => $phone,
+            'message' => 'Saya tertarik, tolong dibantu proses cicilannya.',
+        ]);
+        $response->assertOk();
+        $response->assertJsonPath('data.intent', 'installment');
+        $response->assertJsonPath('data.status', Conversation::STATUS_AI_ACTIVE);
+
+        // Chain penuh (docs/08 langkah 6): satu pesan → lead baru dengan
+        // lead_events berurutan calculator_completed → lead_created → sales_assigned.
+        $lead = Lead::query()->firstOrFail();
+        $this->assertSame('chat', $lead->source);
+        $this->assertSame('NEW', $lead->status);
+        $this->assertSame($customer->id, $lead->customer_id);
+        $this->assertSame($sales->id, $lead->assigned_to);
+        $this->assertSame($lead->id, Conversation::firstOrFail()->lead_id);
+
+        $events = LeadEvent::query()
+            ->where('lead_id', $lead->id)
+            ->orderBy('occurred_at')
+            ->orderBy('id')
+            ->pluck('event_type')
+            ->unique()
+            ->values()
+            ->all();
+        $this->assertSame(['calculator_completed', 'lead_created', 'sales_assigned'], $events);
+
+        // Sesi kalkulator tertaut ke lead
+        $session = CalculatorSession::query()->first();
+        $this->assertSame($lead->id, $session->lead_id);
+
+        // Sales dinotifikasi
+        $this->assertSame(1, Notification::where('user_id', $sales->id)->where('type', 'new_lead')->count());
+
+        // Semua tool call tercatat di ai_agent_logs
+        $this->assertSame(1, AiAgentLog::where('tool_called', 'calculate')->where('status', AiAgentLog::STATUS_SUCCESS)->count());
+        $this->assertSame(1, AiAgentLog::where('tool_called', 'create_lead')->where('status', AiAgentLog::STATUS_SUCCESS)->count());
+        $this->assertSame(1, AiAgentLog::where('tool_called', 'assign_sales')->where('status', AiAgentLog::STATUS_SUCCESS)->count());
     }
 
     public function test_invalid_phone_is_rejected(): void

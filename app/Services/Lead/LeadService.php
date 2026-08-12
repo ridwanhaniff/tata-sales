@@ -13,8 +13,8 @@ use App\Models\Notification;
 use App\Models\PipelineStage;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\Crm\CrmService;
 use App\Services\FollowUp\FollowUpService;
-use App\Services\Webhook\OutboundWebhookService;
 use App\Services\Workflow\WorkflowEngine;
 use App\Support\AuditLogger;
 use App\Support\PhoneNormalizer;
@@ -32,7 +32,7 @@ class LeadService
         private readonly AttributionService $attribution,
         private readonly WorkflowEngine $workflow,
         private readonly FollowUpService $followUps,
-        private readonly OutboundWebhookService $webhooks,
+        private readonly CrmService $crm,
     ) {}
 
     /**
@@ -126,13 +126,6 @@ class LeadService
                 'attribution' => $attribution['data'],
             ]);
 
-            $this->logEvent($lead, 'lead_created', [
-                'source' => $lead->source,
-                'product_id' => $lead->product_id,
-                'campaign_id' => $lead->campaign_id,
-                'attribution' => $attribution['data'],
-            ]);
-
             $this->scoring->apply($lead, $context);
 
             $assigned = null;
@@ -153,13 +146,11 @@ class LeadService
             $this->workflow->trigger('lead_created', $fresh);
             $this->followUps->scheduleFor($fresh, 'lead_created');
 
-            $this->webhooks->dispatch($tenant, 'lead.created', [
-                'lead_id' => $lead->id,
-                'status' => $lead->status,
-                'product_id' => $lead->product_id,
-                'score' => $lead->score,
-                'customer_phone' => $customer->phone,
-            ]);
+            $this->crm->dispatch(
+                $tenant,
+                'lead.created',
+                $this->crm->factory()->lead('lead.created', $fresh)
+            );
 
             return [
                 'lead' => $fresh,
@@ -248,22 +239,20 @@ class LeadService
         $this->followUps->scheduleFor($fresh, 'lead_'.strtolower($to));
 
         if (in_array($to, ['WON', 'LOST'], true) && $tenant) {
-            $this->webhooks->dispatch($tenant, 'deal.'.strtolower($to), [
-                'lead_id' => $lead->id,
-                'status' => $to,
-                'customer_id' => $lead->customer_id,
-                'product_id' => $lead->product_id,
-                'score' => $lead->score,
-            ]);
+            $this->crm->dispatch(
+                $tenant,
+                'deal.'.strtolower($to),
+                $this->crm->factory()->lead('deal.'.strtolower($to), $fresh)
+            );
         } elseif ($tenant) {
-            $this->webhooks->dispatch($tenant, 'lead.updated', [
-                'lead_id' => $lead->id,
-                'from' => $from,
-                'to' => $to,
-                'customer_id' => $lead->customer_id,
-                'product_id' => $lead->product_id,
-                'score' => $lead->score,
-            ]);
+            $this->crm->dispatch(
+                $tenant,
+                'lead.updated',
+                $this->crm->factory()->lead('lead.updated', $fresh, [
+                    'from' => $from,
+                    'to' => $to,
+                ])
+            );
         }
 
         return $fresh;
@@ -358,7 +347,7 @@ class LeadService
         ]);
     }
 
-    private function notifySales(Lead $lead, User $sales): void
+    public function notifySales(Lead $lead, User $sales): void
     {
         Notification::create([
             'tenant_id' => $lead->tenant_id,

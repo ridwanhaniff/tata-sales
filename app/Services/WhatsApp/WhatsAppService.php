@@ -2,9 +2,11 @@
 
 namespace App\Services\WhatsApp;
 
+use App\Models\Customer;
 use App\Models\Followup;
 use App\Models\Lead;
 use App\Models\Quotation;
+use App\Models\Tenant;
 use App\Models\WhatsappMessage;
 use App\Services\WhatsApp\Contracts\WhatsAppProvider;
 use App\Services\WhatsApp\Providers\EchoWhatsAppProvider;
@@ -51,16 +53,53 @@ class WhatsAppService
             throw new \RuntimeException('Nomor WhatsApp customer tidak tersedia.');
         }
 
-        $record = WhatsappMessage::create([
+        return $this->deliver([
             'tenant_id' => $lead->tenant_id,
             'lead_id' => $lead->id,
             'followup_id' => $followup?->id,
             'quotation_id' => $quotation?->id,
             'to_phone' => (string) $phone,
+            'message' => $message,
+            'payload' => $context === [] ? null : $context,
+        ]);
+    }
+
+    /**
+     * Balasan AI chat untuk customer yang belum punya lead (mis. WhatsApp
+     * tanpa consent) — tetap tercatat di whatsapp_messages, lead_id null.
+     *
+     * @param  array<string, mixed>  $context
+     */
+    public function sendToCustomer(
+        Customer $customer,
+        Tenant $tenant,
+        string $message,
+        array $context = [],
+    ): WhatsappMessage {
+        $phone = $customer->phone;
+
+        if (! $phone) {
+            throw new \RuntimeException('Nomor WhatsApp customer tidak tersedia.');
+        }
+
+        return $this->deliver([
+            'tenant_id' => $tenant->id,
+            'to_phone' => (string) $phone,
+            'message' => $message,
+            'payload' => $context === [] ? null : $context,
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function deliver(array $data): WhatsappMessage
+    {
+        $data['message'] = mb_substr((string) $data['message'], 0, 4000);
+
+        $record = WhatsappMessage::create($data + [
             'provider' => (string) config('tata.whatsapp.driver', 'echo'),
             'status' => 'queued',
-            'message' => mb_substr($message, 0, 4000),
-            'payload' => $context === [] ? null : $context,
         ]);
 
         try {
@@ -74,7 +113,7 @@ class WhatsAppService
         } catch (\Throwable $e) {
             Log::warning('whatsapp.send_failed', [
                 'id' => $record->id,
-                'lead_id' => $lead->id,
+                'lead_id' => $record->lead_id,
                 'error' => $e->getMessage(),
             ]);
 

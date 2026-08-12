@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\WhatsApp;
 
+use App\Models\Customer;
 use App\Models\Followup;
 use App\Models\Lead;
 use App\Models\Tenant;
@@ -52,6 +53,34 @@ class WhatsAppServiceTest extends TestCase
         $this->expectException(\RuntimeException::class);
 
         app(WhatsAppService::class)->send($this->lead, 'Pesan tanpa nomor.');
+    }
+
+    public function test_send_to_customer_without_lead_records_message(): void
+    {
+        $customer = Customer::factory()->for($this->tenant)->create(['phone' => '6281299999999']);
+
+        $record = app(WhatsAppService::class)->sendToCustomer(
+            $customer,
+            $this->tenant,
+            'Balasan AI untuk chat WhatsApp.',
+            ['conversation_id' => 'conv-1', 'source' => 'ai_reply'],
+        );
+
+        $this->assertSame('sent', $record->status);
+        $this->assertSame('6281299999999', $record->to_phone);
+        $this->assertSame('Balasan AI untuk chat WhatsApp.', $record->message);
+        $this->assertNull($record->lead_id);
+        $this->assertSame('conv-1', $record->payload['conversation_id']);
+        $this->assertSame('ai_reply', $record->payload['source']);
+    }
+
+    public function test_send_to_customer_without_phone_throws(): void
+    {
+        $customer = Customer::factory()->for($this->tenant)->create(['phone' => null]);
+
+        $this->expectException(\RuntimeException::class);
+
+        app(WhatsAppService::class)->sendToCustomer($customer, $this->tenant, 'Tanpa nomor.');
     }
 
     public function test_meta_provider_posts_to_cloud_api(): void

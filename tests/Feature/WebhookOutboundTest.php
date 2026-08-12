@@ -28,6 +28,9 @@ class WebhookOutboundTest extends TestCase
     {
         parent::setUp();
 
+        // Event keluar lewat konektor CRM (§78) — paksa driver http.
+        config(['crm.driver' => 'http']);
+
         $this->tenant = Tenant::factory()->create([
             'settings' => ['webhook' => [
                 'url' => $this->webhookUrl,

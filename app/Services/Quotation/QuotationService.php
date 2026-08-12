@@ -9,9 +9,9 @@ use App\Models\Quotation;
 use App\Models\QuotationItem;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\Crm\CrmService;
 use App\Services\Lead\LeadService;
 use App\Services\Notification\NotificationService;
-use App\Services\Webhook\OutboundWebhookService;
 use App\Services\WhatsApp\WhatsAppService;
 use App\Support\AuditLogger;
 use Illuminate\Support\Str;
@@ -33,7 +33,7 @@ class QuotationService
         private readonly LeadService $leads,
         private readonly NotificationService $notifications,
         private readonly WhatsAppService $whatsapp,
-        private readonly OutboundWebhookService $webhooks,
+        private readonly CrmService $crm,
     ) {}
 
     /**
@@ -151,13 +151,11 @@ class QuotationService
             ->find($quotation->tenant_id);
 
         if ($tenant) {
-            $this->webhooks->dispatch($tenant, 'quotation.sent', [
-                'quotation_id' => $quotation->id,
-                'lead_id' => $quotation->lead_id,
-                'customer_id' => $quotation->customer_id,
-                'total' => (float) $quotation->total,
-                'status' => 'sent',
-            ]);
+            $this->crm->dispatch(
+                $tenant,
+                'quotation.sent',
+                $this->crm->factory()->quotation('quotation.sent', $quotation)
+            );
         }
 
         if ($quotation->lead && $quotation->lead->customer?->phone) {
@@ -450,13 +448,11 @@ class QuotationService
             ->find($quotation->tenant_id);
 
         if ($tenant) {
-            $this->webhooks->dispatch($tenant, $event, [
-                'quotation_id' => $quotation->id,
-                'lead_id' => $quotation->lead_id,
-                'customer_id' => $quotation->customer_id,
-                'total' => (float) $quotation->total,
-                'status' => $quotation->status,
-            ]);
+            $this->crm->dispatch(
+                $tenant,
+                $event,
+                $this->crm->factory()->quotation($event, $quotation)
+            );
         }
     }
 

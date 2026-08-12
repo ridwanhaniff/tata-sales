@@ -4,7 +4,258 @@
 @source '../../storage/framework/views/*.php';
 @source '../../resources/views/**/*.blade.php';
 
+/*
+ * TATA SALES — Design Tokens
+ * Mengikuti docs/design.md (#6 Color, #8-10 Typography, #11 Spacing,
+ * #15 Radius, #16 Shadow, #17 Border, #96 Focus, #98-100 Motion, #106 Tokens)
+ */
 @theme {
-    --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
-        'Segoe UI Symbol', 'Noto Color Emoji';
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
+
+    /* Base neutrals */
+    --color-white: #FFFFFF;
+    --color-black: #0A0A0A;
+    --color-neutral-50: #F8F9FA;
+    --color-neutral-100: #F1F3F5;
+    --color-neutral-200: #E5E7EB;
+    --color-neutral-300: #D1D5DB;
+    --color-neutral-400: #9CA3AF;
+    --color-neutral-500: #6B7280;
+    --color-neutral-600: #4B5563;
+    --color-neutral-700: #374151;
+    --color-neutral-800: #1F2937;
+    --color-neutral-900: #111827;
+
+    /* Brand accent */
+    --color-primary: #1677FF;
+    --color-primary-hover: #0F67E8;
+    --color-primary-active: #0958CE;
+    --color-primary-soft: #EAF3FF;
+
+    /* Semantic */
+    --color-success: #16A34A;
+    --color-warning: #D97706;
+    --color-danger: #DC2626;
+    --color-info: #2563EB;
+
+    /* Radius */
+    --radius-xs: 6px;
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+    --radius-2xl: 24px;
+
+    /* Shadow — subtle, hanya untuk floating/elevated */
+    --shadow-xs: 0 1px 2px rgb(17 24 39 / 0.05);
+    --shadow-sm: 0 4px 12px rgb(17 24 39 / 0.06);
+    --shadow-md: 0 8px 24px rgb(17 24 39 / 0.09);
+    --shadow-lg: 0 20px 40px rgb(17 24 39 / 0.12);
+
+    /* Motion */
+    --ease-out-quick: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+    html {
+        scroll-behavior: smooth;
+    }
+
+    body {
+        background: var(--color-white);
+        color: var(--color-neutral-900);
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    }
+
+    ::selection {
+        background: var(--color-primary-soft);
+        color: var(--color-primary-active);
+    }
+
+    :focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 2px;
+    }
+
+    [x-cloak] {
+        display: none !important;
+    }
+
+    /* #100 Reduced motion */
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+            scroll-behavior: auto !important;
+        }
+    }
+}
+
+@layer components {
+    /* Layout primitives */
+    .container-page {
+        margin-inline: auto;
+        width: 100%;
+        max-width: 1200px;
+        padding-inline: 24px;
+    }
+
+    @media (min-width: 768px) {
+        .container-page {
+            padding-inline: 32px;
+        }
+    }
+
+    @media (min-width: 1200px) {
+        .container-page {
+            padding-inline: 48px;
+        }
+    }
+
+    .section-pad {
+        padding-block: 80px;
+    }
+
+    @media (min-width: 1024px) {
+        .section-pad {
+            padding-block: 120px;
+        }
+    }
+
+    /* Typography helpers */
+    .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        color: var(--color-primary-active);
+    }
+
+    .eyebrow::before {
+        content: '';
+        width: 20px;
+        height: 2px;
+        border-radius: 999px;
+        background: currentColor;
+        opacity: 0.8;
+    }
+
+    /* Buttons — #19, #20, #102 */
+    .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        min-height: 44px;
+        padding: 10px 24px;
+        border-radius: var(--radius-md);
+        border: 1px solid transparent;
+        font-size: 15px;
+        font-weight: 500;
+        line-height: 1.2;
+        white-space: nowrap;
+        cursor: pointer;
+        transition:
+            background-color 180ms ease-out,
+            border-color 180ms ease-out,
+            color 180ms ease-out,
+            box-shadow 180ms ease-out,
+            transform 180ms ease-out;
+    }
+
+    .btn-primary {
+        background: var(--color-primary);
+        color: #fff;
+        box-shadow: var(--shadow-xs);
+    }
+
+    .btn-primary:hover {
+        background: var(--color-primary-hover);
+        transform: translateY(-1px);
+        box-shadow: var(--shadow-sm);
+    }
+
+    .btn-primary:active {
+        background: var(--color-primary-active);
+        transform: translateY(0);
+    }
+
+    .btn-secondary {
+        background: #fff;
+        color: var(--color-neutral-800);
+        border-color: var(--color-neutral-200);
+    }
+
+    .btn-secondary:hover {
+        background: var(--color-neutral-50);
+        border-color: var(--color-neutral-300);
+        transform: translateY(-1px);
+    }
+
+    .btn-secondary:active {
+        transform: translateY(0);
+    }
+
+    .btn-ghost {
+        background: transparent;
+        color: var(--color-primary-active);
+    }
+
+    .btn-ghost:hover {
+        background: var(--color-primary-soft);
+    }
+
+    .btn-sm {
+        min-height: 36px;
+        padding: 6px 16px;
+        font-size: 14px;
+    }
+
+    /* Card — #30, #108 */
+    .card {
+        background: #fff;
+        border: 1px solid var(--color-neutral-200);
+        border-radius: var(--radius-lg);
+    }
+
+    .card-hover {
+        transition:
+            border-color 200ms ease-out,
+            box-shadow 200ms ease-out,
+            transform 200ms ease-out;
+    }
+
+    .card-hover:hover {
+        border-color: var(--color-neutral-300);
+        box-shadow: var(--shadow-md);
+        transform: translateY(-2px);
+    }
+
+    /* Badge / tag — #30 */
+    .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 12px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        background: var(--color-primary-soft);
+        color: var(--color-primary-active);
+    }
+
+    .badge-dark {
+        background: rgb(255 255 255 / 0.12);
+        color: #fff;
+        backdrop-filter: blur(4px);
+    }
 }

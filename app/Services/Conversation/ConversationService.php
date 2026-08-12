@@ -5,9 +5,11 @@ namespace App\Services\Conversation;
 use App\Agents\AgentContext;
 use App\Agents\CalculatorAgent;
 use App\Agents\Contracts\AgentInterface;
+use App\Agents\HandoffAgent;
 use App\Agents\IntentAgent;
 use App\Agents\ProductAgent;
 use App\Agents\QualificationAgent;
+use App\Agents\RecommendationAgent;
 use App\Models\Calculator;
 use App\Models\Campaign;
 use App\Models\Conversation;
@@ -29,9 +31,11 @@ use InvalidArgumentException;
  * Orchestrator chat (§25, §29-32, §118):
  * pesan masuk → conversation+message tercatat → assembleContext (snapshot
  * data approved) → intent agent → rute ke agent (product/calculator/
- * qualification) → jawaban disimpan. Kalau AI gagal, intent tidak jelas,
- * keluhan, atau permintaan di luar kewenangan → handoff ke manusia
- * (status WAITING_HUMAN, jalur §62/§6).
+ * qualification/recommendation) → jawaban disimpan. Trigger deterministic
+ * (intent tidak jelas, keluhan, pricing exception, minta manusia) lewat
+ * Handoff Agent yang menyusun balasan + request_human; kalau agent gagal,
+ * handoff deterministik + fallback tetap dipakai. Kalau AI gagal → handoff
+ * ke manusia (status WAITING_HUMAN, jalur §62/§6).
  */
 class ConversationService
 {
@@ -67,6 +71,16 @@ class ConversationService
     private function qualificationAgent(): QualificationAgent
     {
         return app(QualificationAgent::class);
+    }
+
+    private function recommendationAgent(): RecommendationAgent
+    {
+        return app(RecommendationAgent::class);
+    }
+
+    private function handoffAgent(): HandoffAgent
+    {
+        return app(HandoffAgent::class);
     }
 
     /**
@@ -172,7 +186,7 @@ class ConversationService
      *
      * @return array{conversation_id: string, reply: string, intent: string, status: string, confidence: float}
      */
-    public function chat(string $customerPhone, string $message, ?string $conversationId, Tenant $tenant): array
+    public function chat(string $customerPhone, string $message, ?string $conversationId, Tenant $tenant, string $channel = 'webchat'): array
     {
         try {
             $phone = PhoneNormalizer::normalize($customerPhone);
@@ -191,7 +205,7 @@ class ConversationService
             ]);
         }
 
-        $conversation = $this->resolveConversation($conversationId, $tenant, $customer);
+        $conversation = $this->resolveConversation($conversationId, $tenant, $customer, $channel);
 
         if (! $conversation->lead_id) {
             $activeLead = Lead::query()
@@ -212,6 +226,19 @@ class ConversationService
             'content' => $message,
         ]);
 
+        return $this->turn($conversation, $tenant, $message);
+    }
+
+    /**
+     * Satu turn AI untuk percakapan yang pesan customer-nya sudah tercatat
+     * (§25): snapshot context → intent → guardrail → agent → jawaban
+     * disimpan. Dipakai webchat (lewat chat()) dan WhatsApp
+     * (ProcessWhatsAppWebhookJob).
+     *
+     * @return array{conversation_id: string, reply: string, intent: string, status: string, confidence: float}
+     */
+    public function turn(Conversation $conversation, Tenant $tenant, string $message): array
+    {
         $snapshot = $this->assembleContext($conversation);
 
         $intent = $this->detectIntent($conversation, $message);
@@ -219,32 +246,31 @@ class ConversationService
         $confidence = $intent['confidence'];
 
         if ($this->shouldHandOff($intentName, $confidence, $message)) {
-            $this->handoff($conversation, "trigger deterministic: {$intentName} (confidence {$confidence})", 'guardrail');
-
-            $this->saveReply($conversation, self::FALLBACK_REPLY, $intentName, 'handoff', $confidence);
-
-            return $this->response($conversation, self::FALLBACK_REPLY, 'handoff', Conversation::STATUS_WAITING_HUMAN, $confidence);
+            return $this->guardrailHandoff($conversation, $tenant, $message, $intentName, $confidence, "trigger deterministic: {$intentName} (confidence {$confidence})");
         }
 
         if ($this->isPricingExceptionRequest($message)) {
-            $this->handoff($conversation, 'pricing exception / negosiasi harga di luar promo', 'guardrail');
-
-            $this->saveReply($conversation, self::FALLBACK_REPLY, $intentName, 'handoff', $confidence);
-
-            return $this->response($conversation, self::FALLBACK_REPLY, 'handoff', Conversation::STATUS_WAITING_HUMAN, $confidence);
+            return $this->guardrailHandoff($conversation, $tenant, $message, $intentName, $confidence, 'pricing exception / negosiasi harga di luar promo');
         }
 
         try {
             $agent = $this->selectAgent($intentName, $snapshot);
 
-            $result = $agent->handle(new AgentContext(
-                message: $message,
-                tenant: $tenant,
-                conversationId: $conversation->id,
-                leadId: $snapshot['lead']['id'] ?? $conversation->lead_id,
-                meta: $snapshot,
-                history: $this->history($conversation),
-            ));
+            $previousConversation = app()->bound('currentConversation') ? app('currentConversation') : null;
+            app()->instance('currentConversation', $conversation);
+
+            try {
+                $result = $agent->handle(new AgentContext(
+                    message: $message,
+                    tenant: $tenant,
+                    conversationId: $conversation->id,
+                    leadId: $snapshot['lead']['id'] ?? $conversation->lead_id,
+                    meta: $snapshot,
+                    history: $this->history($conversation),
+                ));
+            } finally {
+                app()->instance('currentConversation', $previousConversation);
+            }
 
             $reply = (string) ($result['reply'] ?? self::FALLBACK_REPLY);
             $status = Conversation::STATUS_AI_ACTIVE;
@@ -259,9 +285,13 @@ class ConversationService
             $status = Conversation::STATUS_WAITING_HUMAN;
         }
 
-        // Agent sendiri memutuskan handoff (mis. lewat tool request_human)
+        // Agent sendiri memutuskan handoff (mis. lewat tool request_human) —
+        // tool sudah mengeksekusi ConversationService::handoff() (status
+        // WAITING_HUMAN + pesan sistem + notifikasi). Jangan handoff dua kali.
         if (! empty($result['handoff'])) {
-            $this->handoff($conversation, (string) ($result['handoff']['reason'] ?? 'agent meminta manusia'), 'ai');
+            if (($result['handoff']['status'] ?? null) !== Conversation::STATUS_WAITING_HUMAN) {
+                $this->handoff($conversation, (string) ($result['handoff']['reason'] ?? 'agent meminta manusia'), 'ai');
+            }
 
             $this->saveReply($conversation, $reply, $intentName, 'handoff', $confidence);
 
@@ -335,9 +365,77 @@ class ConversationService
             'installment', 'price' => ($snapshot['calculators'] ?? []) !== []
                 ? $this->calculatorAgent()
                 : $this->productAgent(),
-            'purchase_intent' => $this->qualificationAgent(),
+            'recommendation' => $this->recommendationAgent(),
+            'purchase_intent' => $this->isQualifiedForRecommendation($snapshot)
+                ? $this->recommendationAgent()
+                : $this->qualificationAgent(),
             default => $this->productAgent(),
         };
+    }
+
+    /**
+     * Lead "cukup terqualifikasi" untuk rekomendasi (§5): status QUALIFIED
+     * + produk diminati + budget tercatat — baru layak di-rekomendasi.
+     */
+    private function isQualifiedForRecommendation(array $snapshot): bool
+    {
+        $lead = $snapshot['lead'] ?? null;
+
+        if (! $lead || ($lead['status'] ?? '') !== 'QUALIFIED') {
+            return false;
+        }
+
+        return ! empty($lead['estimated_value']) && ! empty($lead['product_id']);
+    }
+
+    /**
+     * Jalur handoff deterministic (§5/§6): Handoff Agent menyusun balasan
+     * ramah + menyerahkan via request_human. Kalau agent gagal atau tidak
+     * memanggil tool, handoff deterministik + FALLBACK_REPLY dipakai —
+     * percakapan tidak pernah macet tanpa manusia.
+     */
+    private function guardrailHandoff(Conversation $conversation, Tenant $tenant, string $message, string $intentName, float $confidence, string $reason): array
+    {
+        $reply = self::FALLBACK_REPLY;
+        $handedOff = false;
+
+        try {
+            $previousConversation = app()->bound('currentConversation') ? app('currentConversation') : null;
+            app()->instance('currentConversation', $conversation);
+
+            try {
+                $result = $this->handoffAgent()->handle(new AgentContext(
+                    message: $message,
+                    tenant: $tenant,
+                    conversationId: $conversation->id,
+                    leadId: $conversation->lead_id,
+                ));
+
+                if (! empty($result['handoff']) && ($result['handoff']['status'] ?? null) === Conversation::STATUS_WAITING_HUMAN) {
+                    $handedOff = true;
+                    $reply = (string) ($result['reply'] ?? '');
+                }
+            } finally {
+                app()->instance('currentConversation', $previousConversation);
+            }
+        } catch (\Throwable $e) {
+            Log::warning('chat.handoff_agent_failed', [
+                'conversation_id' => $conversation->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        if (! $handedOff) {
+            $this->handoff($conversation, $reason, 'guardrail');
+        }
+
+        if ($reply === '') {
+            $reply = self::FALLBACK_REPLY;
+        }
+
+        $this->saveReply($conversation, $reply, $intentName, 'handoff', $confidence);
+
+        return $this->response($conversation, $reply, 'handoff', Conversation::STATUS_WAITING_HUMAN, $confidence);
     }
 
     private function shouldHandOff(string $intent, float $confidence, string $message): bool
@@ -388,7 +486,7 @@ class ConversationService
         }
     }
 
-    private function resolveConversation(?string $conversationId, Tenant $tenant, Customer $customer): Conversation
+    private function resolveConversation(?string $conversationId, Tenant $tenant, Customer $customer, string $channel = 'webchat'): Conversation
     {
         if ($conversationId) {
             $found = Conversation::query()
@@ -412,13 +510,13 @@ class ConversationService
         return Conversation::query()
             ->where('tenant_id', $tenant->id)
             ->where('customer_id', $customer->id)
-            ->where('channel', 'webchat')
+            ->where('channel', $channel)
             ->latest('updated_at')
             ->first()
             ?? Conversation::create([
                 'tenant_id' => $tenant->id,
                 'customer_id' => $customer->id,
-                'channel' => 'webchat',
+                'channel' => $channel,
                 'status' => Conversation::STATUS_AI_ACTIVE,
                 'context' => [],
             ]);

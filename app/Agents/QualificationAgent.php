@@ -2,17 +2,22 @@
 
 namespace App\Agents;
 
+use App\Agents\Tools\AssignSalesTool;
+use App\Agents\Tools\CreateLeadTool;
 use App\Agents\Tools\RequestHumanTool;
 use App\Agents\Tools\UpdateLeadTool;
 use App\Agents\Values\LLMResponse;
 use App\Models\AiAgentLog;
+use App\Services\Lead\AssignmentService;
 use App\Services\Lead\LeadService;
 
 /**
  * Qualification Agent (§5/§29) — mengumpulkan budget, timeline, lokasi,
  * produk diminati, dan niat beli. Data masuk CRM hanya lewat tool
  * update_lead (whitelist field). Tidak pernah memaksa customer dan
- * tidak pernah menyimpulkan nilai yang tidak diucapkan.
+ * tidak pernah menyimpulkan nilai yang tidak diucapkan. Bila percakapan
+ * belum punya lead dan customer berniat membeli → create_lead lalu
+ * assign_sales (consent divalidasi tool, bukan LLM).
  */
 class QualificationAgent extends Agent
 {
@@ -25,6 +30,8 @@ class QualificationAgent extends Agent
     {
         return [
             new UpdateLeadTool(app(LeadService::class)),
+            new CreateLeadTool(app(LeadService::class)),
+            new AssignSalesTool(app(AssignmentService::class), app(LeadService::class)),
             new RequestHumanTool,
         ];
     }
@@ -37,6 +44,7 @@ Kamu adalah asisten kualifikasi penjualan. Tugas: kumpulkan informasi kualifikas
 ATURAN WAJIB:
 - Lead_id ada di konteks percakapan. Kalau tidak ada, jangan dipaksakan memakai tool.
 - Panggil tool update_lead setiap customer menyebut: budget (estimated_value), produk diminati (product_id), lokasi (customer_location), atau timeline.
+- Kalau percakapan belum punya lead dan customer menunjukkan niat beli → panggil create_lead lalu assign_sales. Tool yang memvalidasi consent — kalau tool menolak, jangan paksakan.
 - Hanya catat yang benar-benar diucapkan customer — jangan menyimpulkan nilai atau menekan jawaban.
 - Jangan memaksa; kalau customer enggan, berhenti dengan ramah dan tawarkan bantuan tim.
 - Jawab dalam bahasa Indonesia, ringkas, tanpa markdown.

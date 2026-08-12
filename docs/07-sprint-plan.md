@@ -111,7 +111,7 @@ Sprint 2 minggu. Urutan mengikuti dependency development order blueprint §110 (
 - WhatsApp Business API (ganti link sederhana) — **SELESAI**: provider abstraction (`echo` di dev / `meta` Cloud API), `WhatsAppService` outbox (`whatsapp_messages`), webhook status pesan, follow-up & quotation terkirim via provider, CTA `wa.me` tetap jadi fallback landing (§24-25)
 - Quotation engine penuh (§99) + status `sent/viewed/accepted` — **SELESAI**: create→send (token publik)→viewed→accepted/rejected/expired, link publik + respond, state machine (PROPOSAL→NEGOTIATION→WON/LOST), notification + WhatsApp share
 - Advanced analytics: funnel lengkap, win rate, campaign ROI — **SELESAI**: `/admin/analytics/pipeline`, `/win-rate`, `/campaign-roi` (§95)
-- Integrasi CRM/Meta Ads/Google Ads (§78) — webhook `crm` sudah diverifikasi; konektor kerja penuh masih backlog
+- Integrasi CRM/Meta Ads/Google Ads (§78) — **SELESAI**: konektor penuh (`config/crm.php`, driver `echo`/`http`/`hubspot`, `CrmEventFactory` schema baku, `crm_deliveries` delivery log, admin endpoint `/admin/settings/webhook` + `/admin/crm/deliveries`)
 - RAG penuh untuk knowledge base bila volume FAQ/dokumen sudah besar — gated oleh volume (§66)
 
 Tidak masuk cakupan sprint manapun di atas secara sengaja (§143): omnichannel penuh, marketplace template, AI autonomous agent penuh, billing kompleks, mobile app, microservices — baru relevan di Phase 5 (§108, §130-131) setelah traffic/kebutuhan riil menuntutnya.

@@ -28,8 +28,20 @@ class FollowupAgent extends Agent
 
     protected function systemPrompt(AgentContext $context): string
     {
-        return <<<'PROMPT'
+        $lead = $context->meta['lead'] ?? null;
+        $step = $context->meta['followup_step'] ?? null;
+
+        $block = '';
+        if ($lead) {
+            $block .= "\nKonteks lead: id ".($lead['id'] ?? 'n/a').', status '.($lead['status'] ?? 'n/a').', estimated_value '.((($lead['estimated_value'] ?? null) !== null && $lead['estimated_value'] !== '') ? $lead['estimated_value'] : 'n/a').'.';
+        }
+        if ($step) {
+            $block .= "\nFollowup step aktif: id ".($step['id'] ?? 'n/a').' ("'.($step['name'] ?? '').'"), action '.($step['action'] ?? '').', delay_minutes '.($step['delay_minutes'] ?? '').'. Wajib pakai id step ini untuk parameter step_id dan id lead untuk parameter lead_id di tool create_followup.';
+        }
+
+        return <<<PROMPT
 Kamu adalah copywriter follow-up penjualan. Tugas: menulis draft pesan tindak lanjut sesuai konteks lead dan jadwal rule-based.
+{$block}
 
 ATURAN WAJIB:
 - Wajib panggil tool create_followup; copy follow-up yang kamu tulis masuk ke parameter message.

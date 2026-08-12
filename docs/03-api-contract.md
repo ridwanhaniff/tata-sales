@@ -191,16 +191,31 @@ Semua wajib (§79):
 
 ## 4. Webhook keluar (dikonfigurasi per tenant)
 
-Event: `lead.created`, `lead.updated`, `deal.won`, `deal.lost` (§77, §140).
+Event: `lead.created`, `lead.updated`, `deal.won`, `deal.lost`, `quotation.sent`, `quotation.viewed`, `quotation.accepted`, `quotation.rejected`, `quotation.expired` (§77, §140). Payload baku (canonical schema `CrmEventFactory` — lead_id, pipeline_stage, customer, product, campaign, assigned_sales, dst):
 ```json
 {
   "event": "lead.created",
   "tenant_id": "uuid",
-  "data": { "lead_id": "uuid", "status": "NEW", "product_id": "uuid", "score": 45 },
+  "data": {
+    "lead_id": "uuid",
+    "status": "NEW",
+    "pipeline_stage": { "key": "NEW", "name": "New" },
+    "customer": { "id": "uuid", "name": "Budi", "phone": "...", "email": "..." },
+    "product": { "id": "uuid", "name": "Fronx", "sku": "...", "base_price": 180000000 },
+    "campaign": { "id": null, "name": null },
+    "assigned_sales": { "id": "uuid", "name": "Adi" },
+    "score": 45,
+    "occurred_at": "2026-08-08T10:00:00Z"
+  },
   "sent_at": "2026-08-08T10:00:00Z"
 }
 ```
-Ditandatangani HMAC (header `X-TataSales-Signature`), dikirim lewat `DispatchWebhookJob` dengan retry+backoff.
+Ditandatangani HMAC (header `X-TataSales-Signature`), dikirim lewat konektor CRM (`config/crm.php`, driver `echo`/`http`/`hubspot`) dengan retry+backoff; tiap kiriman tercatat di `crm_deliveries` (status/hasil/error).
+
+Admin endpoints (§78 Sprint 13):
+- `GET/PUT /admin/settings/webhook` — konfigurasi url+secret per tenant (role super_admin/owner/manager)
+- `POST /admin/settings/webhook/test` — ping `test.ping` sinkron ke konektor aktif
+- `GET /admin/crm/deliveries` — delivery log (filter `status`/`event`/`provider`)
 
 ## 5. Internal AI tool endpoints
 

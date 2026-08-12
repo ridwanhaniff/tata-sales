@@ -60,7 +60,7 @@ class CalculatorAgentTest extends TestCase
     {
         $agent = $this->agent(new FakeLLMProvider);
 
-        $this->assertSame(['calculate', 'request_human'], array_map(fn ($t) => $t->name(), $agent->tools()));
+        $this->assertSame(['calculate', 'create_lead', 'assign_sales', 'request_human'], array_map(fn ($t) => $t->name(), $agent->tools()));
     }
 
     public function test_agent_runs_calculate_and_replies_with_machine_output(): void

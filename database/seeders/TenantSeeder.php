@@ -14,6 +14,7 @@ class TenantSeeder extends Seeder
         $tenant = Tenant::factory()->create([
             'name' => 'TATA Demo Auto',
             'slug' => 'demo-auto',
+            'domain' => '127.0.0.1',
             'industry_template' => 'automotive-v1',
         ]);
 

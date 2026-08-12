@@ -11,6 +11,16 @@ class WorkflowRun extends Model
     use BelongsToTenant;
     use HasUuids;
 
+    public const STATUS_RUNNING = 'running';
+
+    public const STATUS_COMPLETED = 'completed';
+
+    public const STATUS_FAILED = 'failed';
+
+    public const STATUS_CANCELLED = 'cancelled';
+
+    public const STATUS_WAITING_HUMAN = 'waiting_human';
+
     protected $guarded = [];
 
     public $timestamps = false;
